@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>ShopAgent · 小店客服</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+<script src="https://cdn.jsdelivr.net/npm/marked@12/marked.min.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   :root {
@@ -75,6 +76,10 @@
     <div class="logo">🛒</div>
     <div class="title">ShopAgent 小店客服<small id="convLabel"></small></div>
     <div class="spacer"></div>
+    <select id="userSelect" title="演示用户切换（不同用户订单数据不同）">
+      <option value="u1001">👤 用户A（u1001）</option>
+      <option value="u1002">👤 用户B（u1002）</option>
+    </select>
     <button class="ctrl" id="newConvBtn" title="开启新会话（上下文清空）">🔄 新会话</button>
   </header>
   <main id="messages"></main>
@@ -95,9 +100,15 @@
   var convLabel = document.getElementById('convLabel');
   var newConvBtn = document.getElementById('newConvBtn');
   var chipsEl = document.getElementById('chips');
+  var userSelect = document.getElementById('userSelect');
 
   var DEFAULT_USER_ID = 'u1001';
   var state = { conversationId: null, userId: DEFAULT_USER_ID, sending: false };
+
+  if (window.marked) {
+    // 对话场景单换行即换行，更贴近聊天体验
+    window.marked.setOptions({ breaks: true, mangle: false, headerIds: false });
+  }
 
   // ---------- 工具函数 ----------
   function newConversationId() {
@@ -304,6 +315,13 @@
 
   newConvBtn.addEventListener('click', function () {
     startNewConversation('新会话已开启～我是小店客服，可以帮您查订单、查物流、找商品。');
+  });
+
+  // 切换演示用户即切换身份视角，上下文不应跨用户延续，自动开新会话
+  userSelect.addEventListener('change', function () {
+    state.userId = userSelect.value;
+    startNewConversation('已切换为 ' + (state.userId === 'u1001' ? '用户 A' : '用户 B') +
+      '，订单数据已切换～（W1 无鉴权演示：身份由前端直传，W8 换登录态）');
   });
 
   // ---------- 快捷问题（演示链路一键触达） ----------
