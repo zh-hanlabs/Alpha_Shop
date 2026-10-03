@@ -2,11 +2,13 @@ spring:
   application:
     name: shopagent
   ai:
-    dashscope:
-      api-key: ${AI_DASHSCOPE_API_KEY}
+    openai:
+      # DeepSeek 兼容 OpenAI 协议；切回通义见 README「模型切换」
+      api-key: ${DEEPSEEK_API_KEY}
+      base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
       chat:
         options:
-          model: qwen-plus   # 调试期可换 qwen-turbo 省钱，验收统一 qwen-plus
+          model: deepseek-chat
 
 # SimpleLoggerAdvisor 决策日志级别：W7 压测与问题定位的数据来源
 logging:

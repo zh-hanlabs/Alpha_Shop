@@ -32,7 +32,7 @@
 | JDK | 17+ | Spring Boot 3.x 硬性要求 | — |
 | 框架 | Spring Boot | 3.5.x（2026-10-03 起跟随 SAA 1.1.2.x GA 基线，3.3.x 已 EOL 且不兼容当前 GA） | 与 Spring AI Alibaba 匹配 |
 | Agent 框架 | Spring AI Alibaba | 1.x（以 java2ai.com 当前 GA 为准；2026-10-03 落地 1.1.2.4-security-fix，starter 坐标 spring-ai-alibaba-starter-dashscope，GA 已发中央仓无需 milestone 仓库） | 你的开源贡献主场 |
-| LLM | 通义 qwen-plus / DeepSeek | 调试 qwen-turbo，验收 plus | 便宜 + 国内可用 |
+| LLM | 通义 qwen-plus / DeepSeek | 调试 qwen-turbo，验收 plus；2026-10-03 起实际接入 DeepSeek（已有 Key，spring-ai-starter-model-openai 兼容协议，切回路径见 README） | 便宜 + 国内可用 |
 | ORM | MyBatis-Plus 或 JPA | 二选一后不再换 | — |
 | 数据库 | H2 → MySQL 8 | W1 用 H2，W7 部署切 MySQL | 零依赖起步 |
 | 缓存/锁 | Redis + Redisson | W3 引入 | 简历核心 |
