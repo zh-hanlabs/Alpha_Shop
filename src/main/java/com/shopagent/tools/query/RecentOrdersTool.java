@@ -2,6 +2,7 @@ package com.shopagent.tools.query;
 
 import com.shopagent.service.OrderService;
 import com.shopagent.tools.support.ToolContextKeys;
+import com.shopagent.tools.support.ToolEvents;
 import com.shopagent.tools.support.ToolResult;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,6 +29,7 @@ public class RecentOrdersTool {
         if (userId == null || userId.toString().isBlank()) {
             return ToolResult.error("用户身份缺失，无法查询订单");
         }
+        ToolEvents.publish(toolContext, "正在查询您的最近订单");
         try {
             return ToolResult.ok(orderService.recentOrders(userId.toString()));
         } catch (Exception e) {

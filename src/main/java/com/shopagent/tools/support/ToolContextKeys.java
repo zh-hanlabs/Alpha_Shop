@@ -8,6 +8,7 @@ package com.shopagent.tools.support;
 public final class ToolContextKeys {
 
     public static final String USER_ID = "userId";
+    public static final String TOOL_EVENT_LISTENER = "toolEventListener";
 
     private ToolContextKeys() {}
 }
