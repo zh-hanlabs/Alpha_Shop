@@ -1,7 +1,10 @@
 package com.shopagent.config;
 
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
+import org.springframework.ai.chat.memory.ChatMemory;
+import org.springframework.ai.chat.memory.MessageWindowChatMemory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
@@ -20,11 +23,19 @@ public class ChatClientConfig {
             - 与购物无关的话题，礼貌说明职责范围，并引导回购物场景。
             """;
 
+    // W1 过渡方案：默认 InMemoryChatMemoryRepository，重启即失忆；W6 换 Redis 实现（决策 D5）
     @Bean
-    public ChatClient chatClient(ChatClient.Builder builder) {
+    public ChatMemory chatMemory() {
+        return MessageWindowChatMemory.builder().build();
+    }
+
+    @Bean
+    public ChatClient chatClient(ChatClient.Builder builder, ChatMemory chatMemory) {
         return builder
                 .defaultSystem(SYSTEM_PROMPT)
-                .defaultAdvisors(new SimpleLoggerAdvisor())
+                .defaultAdvisors(
+                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
+                        new SimpleLoggerAdvisor())
                 .build();
     }
 }
