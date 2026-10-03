@@ -18,8 +18,10 @@ setx DEEPSEEK_API_KEY "sk-xxx"
 # 2. 启动（Maven Wrapper 免安装，仅需 JDK）
 ./mvnw spring-boot:run
 
-# 3. 验证第一个对话接口
-curl "http://localhost:8080/api/chat?query=你好"
+# 3. 验证对话接口（POST JSON）
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"conversationId":"c1","message":"你好"}' \
+  http://localhost:8080/api/chat
 ```
 
 ## 模型切换
