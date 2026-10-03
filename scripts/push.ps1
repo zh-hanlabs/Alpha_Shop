@@ -1,4 +1,4 @@
-param([string]$Branch = "")
+﻿param([string]$Branch = "")
 
 $ErrorActionPreference = "Stop"
 $repoRoot = Split-Path -Parent $PSScriptRoot
