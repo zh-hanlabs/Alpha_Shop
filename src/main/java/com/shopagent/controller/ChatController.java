@@ -66,7 +66,13 @@ public class ChatController {
         return Flux.concat(
                         Flux.just(ServerSentEvent.builder("思考中…").event("thinking").build()),
                         Flux.merge(chatEvents, toolEvents.asFlux()),
-                        Flux.just(ServerSentEvent.builder("[DONE]").event("done").build()));
+                        Flux.just(ServerSentEvent.builder("[DONE]").event("done").build()))
+                .onErrorResume(e -> {
+                    log.error("chat stream failed, conversationId={}", request.conversationId(), e);
+                    return Flux.just(
+                            ServerSentEvent.builder("服务开小差了，请稍后重试～").event("error").build(),
+                            ServerSentEvent.builder("[DONE]").event("done").build());
+                });
     }
 
     private String resolveUserId(ChatRequest request) {
