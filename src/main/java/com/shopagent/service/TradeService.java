@@ -13,6 +13,8 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -21,6 +23,13 @@ public class TradeService {
 
     // 状态口径与 mock 数据一致（data.sql 英文枚举），中文话术由模型翻译
     private static final String STATUS_PENDING_PAYMENT = "PENDING_PAYMENT";
+    private static final String STATUS_SHIPPED = "SHIPPED";
+    private static final String STATUS_DELIVERED = "DELIVERED";
+    private static final String STATUS_CANCELLED = "CANCELLED";
+    private static final String STATUS_REFUNDED = "REFUNDED";
+    // 状态机（T5.2）：退款仅已发货/已签收可办；取消仅待付款可办
+    private static final Set<String> REFUNDABLE_FROM = Set.of(STATUS_SHIPPED, STATUS_DELIVERED);
+    private static final Set<String> CANCELLABLE_FROM = Set.of(STATUS_PENDING_PAYMENT);
 
     // 订单号 = yyyyMMddHHmmss(14) + 6 位后缀 = 20 位纯数字，配合工具层 \d{1,20} 白名单
     private static final DateTimeFormatter ORDER_NO_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmss");
@@ -79,6 +88,59 @@ public class TradeService {
         orderItemMapper.insert(item);
 
         return PlaceOutcome.placed(orderNo, product.getName(), quantity, total);
+    }
+
+    // 退款：已发货/已签收 → 已退款（T5.2 状态机）
+    @Transactional
+    public OrderActionOutcome refund(String userId, String orderNo) {
+        return transition(userId, orderNo, STATUS_REFUNDED, REFUNDABLE_FROM);
+    }
+
+    // 取消：仅待付款可取消
+    @Transactional
+    public OrderActionOutcome cancel(String userId, String orderNo) {
+        return transition(userId, orderNo, STATUS_CANCELLED, CANCELLABLE_FROM);
+    }
+
+    private OrderActionOutcome transition(String userId, String orderNo, String targetStatus,
+                                          Set<String> allowedFrom) {
+        // 归属条件并入同一条查询：他人订单与不存在不可区分（W1D8 口径，不泄露存在性）
+        Order order = orderMapper.selectOne(Wrappers.<Order>lambdaQuery()
+                .eq(Order::getOrderNo, orderNo)
+                .eq(Order::getUserId, userId));
+        if (order == null) {
+            return OrderActionOutcome.notFound();
+        }
+        if (!allowedFrom.contains(order.getStatus())) {
+            return OrderActionOutcome.notAllowed(order.getStatus());
+        }
+        // 条件迁移：status IN (allowedFrom) 防并发双改——工具层用户+订单锁之外的第二道防线
+        int updated = orderMapper.update(null, Wrappers.<Order>lambdaUpdate()
+                .set(Order::getStatus, targetStatus)
+                .set(Order::getUpdatedAt, LocalDateTime.now())
+                .eq(Order::getOrderNo, orderNo)
+                .eq(Order::getUserId, userId)
+                .in(Order::getStatus, allowedFrom));
+        if (updated == 0) {
+            // 锁外并发已改走状态（如另一请求先取消）：以库内最新状态回话术
+            Order fresh = orderMapper.selectOne(Wrappers.<Order>lambdaQuery()
+                    .eq(Order::getOrderNo, orderNo)
+                    .eq(Order::getUserId, userId));
+            return OrderActionOutcome.notAllowed(fresh == null ? order.getStatus() : fresh.getStatus());
+        }
+        restoreStock(orderNo);
+        return OrderActionOutcome.done(orderNo, targetStatus, order.getTotalAmount());
+    }
+
+    // 还库存：按下单时的快照逐商品原子 +N（不做读改写），退款/取消共用
+    private void restoreStock(String orderNo) {
+        List<OrderItem> items = orderItemMapper.selectList(
+                Wrappers.<OrderItem>lambdaQuery().eq(OrderItem::getOrderNo, orderNo));
+        for (OrderItem item : items) {
+            productMapper.update(null, Wrappers.<Product>lambdaUpdate()
+                    .setSql("stock = stock + " + item.getQuantity())
+                    .eq(Product::getId, item.getProductId()));
+        }
     }
 
     private String generateOrderNo() {

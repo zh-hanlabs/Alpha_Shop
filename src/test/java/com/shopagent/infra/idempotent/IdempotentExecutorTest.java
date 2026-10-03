@@ -142,4 +142,32 @@ class IdempotentExecutorTest {
         assertThat(executions.get()).isEqualTo(0);
         verify(markBucket).delete();
     }
+
+    // ===== 锁外快查（TradeGuard 闸序用）=====
+
+    @Test
+    void peek_returns_cached_result() throws Exception {
+        ToolResult first = ToolResult.ok(Map.of("orderNo", "20261003120000000001"));
+        when(resultBucket.get()).thenReturn(objectMapper.writeValueAsString(first));
+
+        ToolResult peeked = executor.peekResult("key-8");
+
+        assertThat(peeked.code()).isEqualTo(ToolResult.CODE_SUCCESS);
+        assertThat(peeked.data()).isEqualTo(first.data());
+    }
+
+    @Test
+    void peek_returns_null_on_miss() {
+        when(resultBucket.get()).thenReturn(null);
+
+        assertThat(executor.peekResult("key-9")).isNull();
+    }
+
+    @Test
+    void peek_failure_degrades_to_null_without_throwing() {
+        when(resultBucket.get()).thenThrow(new RuntimeException("connection refused"));
+
+        // 快查故障不抛异常：降级 null 走完整闸序，fail-closed 由 withLock 兜底
+        assertThat(executor.peekResult("key-10")).isNull();
+    }
 }

@@ -133,6 +133,133 @@ class TradeServiceTest {
         assertThat(orderNos).hasSize(10);
     }
 
+    // ===== 退款状态机（T5.2：已发货/已签收 → 已退款）=====
+
+    @Test
+    void refund_shipped_or_delivered_transitions_to_refunded_and_restores_stock() {
+        long productId = insertProduct("测试耳机", "199.00", 5);
+
+        PlaceOutcome shippedOrder = tradeService.place("u9101", productId, 2);
+        forceStatus(shippedOrder.orderNo(), "SHIPPED");
+        PlaceOutcome deliveredOrder = tradeService.place("u9102", productId, 1);
+        forceStatus(deliveredOrder.orderNo(), "DELIVERED");
+
+        OrderActionOutcome refundShipped = tradeService.refund("u9101", shippedOrder.orderNo());
+        OrderActionOutcome refundDelivered = tradeService.refund("u9102", deliveredOrder.orderNo());
+
+        assertThat(refundShipped.status()).isEqualTo(OrderActionOutcome.Status.DONE);
+        assertThat(refundShipped.targetStatus()).isEqualTo("REFUNDED");
+        assertThat(refundShipped.amount()).isEqualByComparingTo("398.00");
+        assertThat(refundDelivered.status()).isEqualTo(OrderActionOutcome.Status.DONE);
+        assertThat(orderStatus(shippedOrder.orderNo())).isEqualTo("REFUNDED");
+        assertThat(orderStatus(deliveredOrder.orderNo())).isEqualTo("REFUNDED");
+        // 下单共扣 3（2+1），退款按快照全还：5
+        assertThat(productMapper.selectById(productId).getStock()).isEqualTo(5);
+    }
+
+    @Test
+    void refund_rejects_non_refundable_states_with_current_status() {
+        long productId = insertProduct("测试台灯", "89.00", 10);
+
+        PlaceOutcome pendingOrder = tradeService.place("u9102", productId, 1);
+        PlaceOutcome refundingOrder = tradeService.place("u9102", productId, 1);
+        forceStatus(refundingOrder.orderNo(), "REFUNDING");
+
+        OrderActionOutcome refundPending = tradeService.refund("u9102", pendingOrder.orderNo());
+        OrderActionOutcome refundRefunding = tradeService.refund("u9102", refundingOrder.orderNo());
+
+        // 待付款 → 工具层引导取消；退款中 → 已在流程（业务层只报当前状态）
+        assertThat(refundPending.status()).isEqualTo(OrderActionOutcome.Status.NOT_ALLOWED);
+        assertThat(refundPending.currentStatus()).isEqualTo("PENDING_PAYMENT");
+        assertThat(refundRefunding.status()).isEqualTo(OrderActionOutcome.Status.NOT_ALLOWED);
+        assertThat(refundRefunding.currentStatus()).isEqualTo("REFUNDING");
+        // 拒绝时状态与库存都不动
+        assertThat(productMapper.selectById(productId).getStock()).isEqualTo(8);
+    }
+
+    @Test
+    void refund_twice_second_is_rejected_without_double_stock_restore() {
+        long productId = insertProduct("测试风扇", "129.00", 6);
+        PlaceOutcome placed = tradeService.place("u9103", productId, 1);
+        forceStatus(placed.orderNo(), "SHIPPED");
+
+        tradeService.refund("u9103", placed.orderNo());
+        OrderActionOutcome again = tradeService.refund("u9103", placed.orderNo());
+
+        assertThat(again.status()).isEqualTo(OrderActionOutcome.Status.NOT_ALLOWED);
+        assertThat(again.currentStatus()).isEqualTo("REFUNDED");
+        // 库存只还一次
+        assertThat(productMapper.selectById(productId).getStock()).isEqualTo(6);
+    }
+
+    // ===== 取消状态机（T5.2：仅待付款可取消）=====
+
+    @Test
+    void cancel_pending_payment_succeeds_and_restores_stock() {
+        long productId = insertProduct("测试鼠标", "49.00", 7);
+        PlaceOutcome placed = tradeService.place("u9106", productId, 3);
+
+        OrderActionOutcome outcome = tradeService.cancel("u9106", placed.orderNo());
+
+        assertThat(outcome.status()).isEqualTo(OrderActionOutcome.Status.DONE);
+        assertThat(outcome.targetStatus()).isEqualTo("CANCELLED");
+        assertThat(outcome.amount()).isEqualByComparingTo("147.00");
+        assertThat(orderStatus(placed.orderNo())).isEqualTo("CANCELLED");
+        assertThat(productMapper.selectById(productId).getStock()).isEqualTo(7);
+    }
+
+    @Test
+    void cancel_rejects_non_pending_and_repeat_cancel() {
+        long productId = insertProduct("测试显示器", "899.00", 4);
+        PlaceOutcome shipped = tradeService.place("u9107", productId, 1);
+        forceStatus(shipped.orderNo(), "SHIPPED");
+        PlaceOutcome pending = tradeService.place("u9107", productId, 1);
+
+        OrderActionOutcome cancelShipped = tradeService.cancel("u9107", shipped.orderNo());
+        tradeService.cancel("u9107", pending.orderNo());
+        OrderActionOutcome cancelTwice = tradeService.cancel("u9107", pending.orderNo());
+
+        assertThat(cancelShipped.status()).isEqualTo(OrderActionOutcome.Status.NOT_ALLOWED);
+        assertThat(cancelShipped.currentStatus()).isEqualTo("SHIPPED");
+        assertThat(cancelTwice.status()).isEqualTo(OrderActionOutcome.Status.NOT_ALLOWED);
+        assertThat(cancelTwice.currentStatus()).isEqualTo("CANCELLED");
+        // 库存 4 → 下两单 2 → 取消待付款单还 1 = 3，只还一次
+        assertThat(productMapper.selectById(productId).getStock()).isEqualTo(3);
+    }
+
+    // ===== 归属校验（W1D8 口径：他人订单与不存在同话术）=====
+
+    @Test
+    void refund_and_cancel_unknown_or_foreign_order_same_not_found() {
+        long productId = insertProduct("测试键盘", "299.00", 5);
+        PlaceOutcome mine = tradeService.place("u9104", productId, 1);
+        forceStatus(mine.orderNo(), "SHIPPED");
+
+        assertThat(tradeService.refund("u9104", "99999999999999999999").status())
+                .isEqualTo(OrderActionOutcome.Status.ORDER_NOT_FOUND);
+        assertThat(tradeService.refund("u9105", mine.orderNo()).status())
+                .isEqualTo(OrderActionOutcome.Status.ORDER_NOT_FOUND);
+        assertThat(tradeService.cancel("u9104", "99999999999999999999").status())
+                .isEqualTo(OrderActionOutcome.Status.ORDER_NOT_FOUND);
+        assertThat(tradeService.cancel("u9105", mine.orderNo()).status())
+                .isEqualTo(OrderActionOutcome.Status.ORDER_NOT_FOUND);
+        // 越权尝试后库存与状态不变
+        assertThat(productMapper.selectById(productId).getStock()).isEqualTo(4);
+        assertThat(orderStatus(mine.orderNo())).isEqualTo("SHIPPED");
+    }
+
+    private void forceStatus(String orderNo, String status) {
+        Order order = orderMapper.selectOne(
+                Wrappers.<Order>lambdaQuery().eq(Order::getOrderNo, orderNo));
+        order.setStatus(status);
+        orderMapper.updateById(order);
+    }
+
+    private String orderStatus(String orderNo) {
+        return orderMapper.selectOne(
+                Wrappers.<Order>lambdaQuery().eq(Order::getOrderNo, orderNo)).getStatus();
+    }
+
     private long insertProduct(String name, String price, int stock) {
         Product product = new Product();
         product.setName(name);

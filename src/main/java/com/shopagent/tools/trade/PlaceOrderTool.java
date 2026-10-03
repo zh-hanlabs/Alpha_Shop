@@ -1,8 +1,7 @@
 package com.shopagent.tools.trade;
 
-import com.shopagent.infra.idempotent.IdempotentExecutor;
+import com.shopagent.infra.guard.TradeGuard;
 import com.shopagent.infra.idempotent.IdempotentKeys;
-import com.shopagent.infra.lock.LockExecutor;
 import com.shopagent.infra.lock.LockKeys;
 import com.shopagent.service.PlaceOutcome;
 import com.shopagent.service.TradeService;
@@ -31,13 +30,11 @@ public class PlaceOrderTool {
     private static final int DEFAULT_QUANTITY = 1;
 
     private final TradeService tradeService;
-    private final IdempotentExecutor idempotentExecutor;
-    private final LockExecutor lockExecutor;
+    private final TradeGuard tradeGuard;
 
-    public PlaceOrderTool(TradeService tradeService, IdempotentExecutor idempotentExecutor, LockExecutor lockExecutor) {
+    public PlaceOrderTool(TradeService tradeService, TradeGuard tradeGuard) {
         this.tradeService = tradeService;
-        this.idempotentExecutor = idempotentExecutor;
-        this.lockExecutor = lockExecutor;
+        this.tradeGuard = tradeGuard;
     }
 
     // 二次确认靠 Prompt 层约束（体验层），防重复下单靠锁+幂等（安全边界）——与 W1D8 两层安全同构；
@@ -69,10 +66,9 @@ public class PlaceOrderTool {
         long productIdValue = Long.parseLong(productId);
         ToolEvents.publish(toolContext, "正在下单，商品 id " + productId + " × " + qty);
         String idempotentKey = IdempotentKeys.placeOrder(userId, productIdValue, qty, conversationId, instructionDigest);
-        // 完整闸序（§2.3）：抢锁(3s) → 锁内幂等(result 快查/mark/业务) → finally 解锁。
+        // 完整闸序（§2.3，TradeGuard 编排）：result 快查(锁外) → 抢锁(3s) → 锁内幂等 → finally 解锁。
         // 锁防并发双写，幂等防锁释放后的重放——双保险缺一不可
-        return lockExecutor.withLock(LockKeys.placeOrder(userId, productIdValue), () ->
-                idempotentExecutor.execute(idempotentKey, () -> {
+        return tradeGuard.execute(LockKeys.placeOrder(userId, productIdValue), idempotentKey, () -> {
             try {
                 PlaceOutcome outcome = tradeService.place(userId, productIdValue, qty);
                 return switch (outcome.status()) {
@@ -86,7 +82,7 @@ public class PlaceOrderTool {
                 log.error("placeOrder failed, productId={}, quantity={}", productId, qty, e);
                 return ToolResult.error("下单失败，请稍后再试");
             }
-                }));
+        });
     }
 
     record PlacedData(String orderNo, String productName, int quantity, BigDecimal totalAmount, String status) {

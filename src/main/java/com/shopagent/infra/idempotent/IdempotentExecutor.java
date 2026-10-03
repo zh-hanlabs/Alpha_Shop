@@ -41,6 +41,21 @@ public class IdempotentExecutor {
         this.objectMapper = objectMapper;
     }
 
+    /**
+     * 锁外 result 快查（TradeGuard 闸序 §2.3）：重放请求直接返回首次结果，不付抢锁开销。
+     * 未命中或 Redis 故障统一返回 null，调用方走完整闸序（withLock 内自然 fail-closed）。
+     */
+    public ToolResult peekResult(String idempotentKey) {
+        try {
+            RBucket<String> resultBucket = redissonClient.getBucket(RESULT_PREFIX + idempotentKey);
+            String cached = resultBucket.get();
+            return cached == null ? null : objectMapper.readValue(cached, ToolResult.class);
+        } catch (Exception e) {
+            log.error("idempotent peek failed, key={}", idempotentKey, e);
+            return null;
+        }
+    }
+
     public ToolResult execute(String idempotentKey, Supplier<ToolResult> action) {
         String resultKey = RESULT_PREFIX + idempotentKey;
         String markKey = MARK_PREFIX + idempotentKey;
