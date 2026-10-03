@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ShopAgent · 小店客服</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🤖</text></svg>">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --bg: #f5f6fa;
+    --card: #ffffff;
+    --primary: #4f6ef2;
+    --primary-dark: #3d5ae0;
+    --user-bubble: #4f6ef2;
+    --user-text: #ffffff;
+    --bot-bubble: #ffffff;
+    --text: #26282f;
+    --text-sub: #8a8f9e;
+    --border: #e6e8f0;
+  }
+  html, body { height: 100%; }
+  body { font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; background: var(--bg); color: var(--text); }
+  .app { max-width: 860px; height: 100vh; margin: 0 auto; display: flex; flex-direction: column; background: var(--card); box-shadow: 0 0 40px rgba(0,0,0,.06); }
+
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-bottom: 1px solid var(--border); background: var(--card); }
+  header .logo { width: 38px; height: 38px; border-radius: 10px; background: linear-gradient(135deg, #4f6ef2, #7a5cf0); display: flex; align-items: center; justify-content: center; font-size: 20px; }
+  header .title { font-size: 16px; font-weight: 600; }
+  header .title small { display: block; font-size: 11px; font-weight: 400; color: var(--text-sub); }
+  header .spacer { flex: 1; }
+  select, button.ctrl { border: 1px solid var(--border); background: var(--card); color: var(--text); border-radius: 8px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  button.ctrl:hover { border-color: var(--primary); color: var(--primary); }
+
+  main { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+  .row { display: flex; gap: 10px; align-items: flex-start; }
+  .row.user { flex-direction: row-reverse; }
+  .avatar { width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 17px; background: var(--bg); }
+  .row.assistant .avatar { background: #eef0fe; }
+  .bubble-wrap { max-width: 78%; display: flex; flex-direction: column; gap: 6px; }
+  .row.user .bubble-wrap { align-items: flex-end; }
+  .bubble { padding: 10px 14px; border-radius: 12px; line-height: 1.65; font-size: 14.5px; word-break: break-word; overflow-wrap: anywhere; }
+  .row.user .bubble { background: var(--user-bubble); color: var(--user-text); border-top-right-radius: 4px; white-space: pre-wrap; }
+  .row.assistant .bubble { background: var(--bot-bubble); border: 1px solid var(--border); border-top-left-radius: 4px; }
+  .bubble table { border-collapse: collapse; margin: 8px 0; font-size: 13px; }
+  .bubble th, .bubble td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; }
+  .bubble th { background: var(--bg); }
+  .bubble ul { padding-left: 20px; margin: 6px 0; }
+  .bubble p { margin: 4px 0; }
+  .bubble .cursor { display: inline-block; width: 7px; height: 15px; background: var(--primary); margin-left: 2px; vertical-align: text-bottom; animation: blink 0.9s infinite; border-radius: 1px; }
+  @keyframes blink { 50% { opacity: 0; } }
+
+  .tool-line { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; color: var(--primary-dark); background: #eef0fe; border-radius: 8px; padding: 5px 10px; align-self: flex-start; }
+  .tool-line .spin { display: inline-block; animation: spin 1.1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .typing-dots span { display: inline-block; width: 5px; height: 5px; border-radius: 50%; background: var(--text-sub); margin: 0 1.5px; animation: bounce 1.2s infinite; }
+  .typing-dots span:nth-child(2) { animation-delay: .15s; }
+  .typing-dots span:nth-child(3) { animation-delay: .3s; }
+  @keyframes bounce { 0%, 60%, 100% { transform: translateY(0); } 30% { transform: translateY(-4px); } }
+  .bubble.error { background: #fff1f0; border-color: #ffccc7; color: #cf1322; }
+
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; padding: 0 20px 12px; }
+  .chips button { border: 1px solid var(--primary); color: var(--primary); background: var(--card); border-radius: 16px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
+  .chips button:hover { background: #eef0fe; }
+
+  footer { display: flex; gap: 10px; padding: 14px 20px; border-top: 1px solid var(--border); background: var(--card); }
+  footer input { flex: 1; border: 1px solid var(--border); border-radius: 10px; padding: 11px 14px; font-size: 14.5px; outline: none; }
+  footer input:focus { border-color: var(--primary); }
+  footer button.send { border: none; background: var(--primary); color: #fff; border-radius: 10px; padding: 0 22px; font-size: 14.5px; cursor: pointer; }
+  footer button.send:disabled { background: #b8bfe8; cursor: not-allowed; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="logo">🛒</div>
+    <div class="title">ShopAgent 小店客服<small id="convLabel"></small></div>
+    <div class="spacer"></div>
+    <button class="ctrl" id="newConvBtn" title="开启新会话（上下文清空）">🔄 新会话</button>
+  </header>
+  <main id="messages"></main>
+  <div class="chips" id="chips"></div>
+  <footer>
+    <input id="input" type="text" placeholder="问点什么，比如：订单 10001 到哪了" autocomplete="off">
+    <button class="send" id="sendBtn">发送</button>
+  </footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  var messagesEl = document.getElementById('messages');
+  var inputEl = document.getElementById('input');
+  var sendBtn = document.getElementById('sendBtn');
+  var convLabel = document.getElementById('convLabel');
+  var newConvBtn = document.getElementById('newConvBtn');
+  var chipsEl = document.getElementById('chips');
+
+  var DEFAULT_USER_ID = 'u1001';
+  var state = { conversationId: null, userId: DEFAULT_USER_ID, sending: false };
+
+  // ---------- 工具函数 ----------
+  function newConversationId() {
+    return 'web-' + (crypto.randomUUID ? crypto.randomUUID().slice(0, 8) : Date.now().toString(36));
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // marked 缺席（离线）时退化为转义纯文本，保证可用性
+  function renderMarkdown(text) {
+    if (window.marked) return window.marked.parse(text);
+    return '<p style="white-space:pre-wrap">' + escapeHtml(text) + '</p>';
+  }
+
+  function scrollToBottom() { messagesEl.scrollTop = messagesEl.scrollHeight; }
+
+  // ---------- 消息渲染 ----------
+  function appendRow(role) {
+    var row = document.createElement('div');
+    row.className = 'row ' + role;
+    var avatar = document.createElement('div');
+    avatar.className = 'avatar';
+    avatar.textContent = role === 'user' ? '👤' : '🤖';
+    var wrap = document.createElement('div');
+    wrap.className = 'bubble-wrap';
+    var bubble = document.createElement('div');
+    bubble.className = 'bubble';
+    wrap.appendChild(bubble);
+    row.appendChild(avatar); row.appendChild(wrap);
+    messagesEl.appendChild(row);
+    scrollToBottom();
+    return { row: row, wrap: wrap, bubble: bubble };
+  }
+
+  function appendThinkingIndicator(wrap) {
+    var el = document.createElement('div');
+    el.className = 'bubble';
+    el.innerHTML = '<span class="typing-dots"><span></span><span></span><span></span></span>';
+    wrap.appendChild(el);
+    scrollToBottom();
+    return el;
+  }
+
+  // ---------- 平滑打字机 ----------
+  // SSE 块到达节奏由模型 token 速度决定，这里按固定 tick 消费队列，避免长回复越落越远
+  function createTypewriter(bubble) {
+    var queue = '';
+    var rendered = '';
+    var timer = null;
+    var drainFast = false;
+
+    function tick() {
+      var backlog = queue.length;
+      if (backlog === 0) { if (!drainFast) renderCursor(false); return; }
+      var speed = drainFast ? Math.max(3, Math.ceil(backlog / 8)) : Math.max(1, Math.ceil(backlog / 30));
+      rendered += queue.slice(0, speed);
+      queue = queue.slice(speed);
+      renderCursor(true);
+      if (queue.length === 0 && drainFast) { timer && clearInterval(timer); timer = null; renderCursor(false); }
+    }
+
+    function renderCursor(show) {
+      bubble.innerHTML = renderMarkdown(rendered + queue);
+      if (show) {
+        var c = document.createElement('span');
+        c.className = 'cursor';
+        bubble.appendChild(c);
+      }
+      scrollToBottom();
+    }
+
+    return {
+      push: function (text) { queue += text; if (!timer) timer = setInterval(tick, 16); },
+      finish: function () { drainFast = true; if (!timer) timer = setInterval(tick, 16); },
+      isDone: function () { return queue.length === 0; }
+    };
+  }
+
+  // ---------- SSE 消费（POST 无法用 EventSource，fetch + ReadableStream 手动解析） ----------
+  async function streamChat(message) {
+    var resp = await fetch('/api/chat/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ conversationId: state.conversationId, message: message, userId: state.userId })
+    });
+    if (!resp.ok || !resp.body) throw new Error('HTTP ' + resp.status);
+
+    var reader = resp.body.getReader();
+    var decoder = new TextDecoder('utf-8');
+    var buffer = '';
+    var assistant = null;
+    var typewriter = null;
+    var thinkingEl = null;
+
+    function clearThinking() {
+      if (thinkingEl) { thinkingEl.remove(); thinkingEl = null; }
+    }
+
+    function handleEvent(eventName, data) {
+      if (eventName === 'thinking') {
+        assistant = assistant || appendRow('assistant');
+        thinkingEl = appendThinkingIndicator(assistant.wrap);
+        return;
+      }
+      if (eventName === 'tool') {
+        clearThinking();
+        assistant = assistant || appendRow('assistant');
+        var line = document.createElement('div');
+        line.className = 'tool-line';
+        line.innerHTML = '<span class="spin">🔍</span> ' + escapeHtml(data);
+        assistant.wrap.appendChild(line);
+        scrollToBottom();
+        return;
+      }
+      if (eventName === 'answer') {
+        clearThinking();
+        assistant = assistant || appendRow('assistant');
+        typewriter = typewriter || createTypewriter(assistant.bubble);
+        typewriter.push(data);
+        return;
+      }
+      if (eventName === 'error') {
+        clearThinking();
+        assistant = assistant || appendRow('assistant');
+        assistant.bubble.className = 'bubble error';
+        typewriter && typewriter.finish();
+        assistant.bubble.textContent = data;
+        scrollToBottom();
+        return;
+      }
+      if (eventName === 'done') { typewriter && typewriter.finish(); }
+    }
+
+    while (true) {
+      var chunk = await reader.read();
+      if (chunk.done) break;
+      buffer += decoder.decode(chunk.value, { stream: true });
+      var parts = buffer.split(/\r?\n\r?\n/);
+      buffer = parts.pop();
+      for (var i = 0; i < parts.length; i++) {
+        var ev = parseSseBlock(parts[i]);
+        if (ev) handleEvent(ev.name, ev.data);
+      }
+    }
+    var tail = parseSseBlock(buffer);
+    if (tail) handleEvent(tail.name, tail.data);
+  }
+
+  function parseSseBlock(block) {
+    if (!block) return null;
+    var eventName = 'message';
+    var dataLines = [];
+    var lines = block.split(/\r?\n/);
+    for (var i = 0; i < lines.length; i++) {
+      if (lines[i].indexOf('event:') === 0) eventName = lines[i].slice(6).trim();
+      else if (lines[i].indexOf('data:') === 0) dataLines.push(lines[i].slice(5));
+    }
+    if (dataLines.length === 0) return null;
+    return { name: eventName, data: dataLines.join('\n') };
+  }
+
+  // ---------- 发送交互 ----------
+  function setSending(on) {
+    state.sending = on;
+    sendBtn.disabled = on;
+    inputEl.disabled = on;
+    sendBtn.textContent = on ? '回答中' : '发送';
+  }
+
+  async function send(message) {
+    if (state.sending || !message.trim()) return;
+    inputEl.value = '';
+    var userRow = appendRow('user');
+    userRow.bubble.textContent = message;
+    setSending(true);
+    try {
+      await streamChat(message);
+    } catch (e) {
+      var errRow = appendRow('assistant');
+      errRow.bubble.className = 'bubble error';
+      errRow.bubble.textContent = '连接异常：' + e.message + '，请稍后重试';
+      scrollToBottom();
+    } finally {
+      setSending(false);
+      inputEl.focus();
+    }
+  }
+
+  sendBtn.addEventListener('click', function () { send(inputEl.value); });
+  inputEl.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' && !e.isComposing) send(inputEl.value);
+  });
+
+  // ---------- 会话管理 ----------
+  function startNewConversation(welcomeText) {
+    state.conversationId = newConversationId();
+    convLabel.textContent = '会话 ' + state.conversationId;
+    messagesEl.innerHTML = '';
+    var row = appendRow('assistant');
+    row.bubble.textContent = welcomeText;
+  }
+
+  newConvBtn.addEventListener('click', function () {
+    startNewConversation('新会话已开启～我是小店客服，可以帮您查订单、查物流、找商品。');
+  });
+
+  // ---------- 快捷问题（演示链路一键触达） ----------
+  var QUICK_QUESTIONS = [
+    '我的订单 10001 到哪了',
+    '有没有充电宝？多少钱',
+    '我最近的订单有哪些',
+    '帮我查一下订单 10001 买了什么'
+  ];
+  QUICK_QUESTIONS.forEach(function (q) {
+    var b = document.createElement('button');
+    b.textContent = q;
+    b.addEventListener('click', function () { send(q); });
+    chipsEl.appendChild(b);
+  });
+
+  startNewConversation('您好，我是小店智能客服 🤖 可以帮您查订单、查物流、找商品。试试下面的快捷提问，或直接输入您的问题～');
+  inputEl.focus();
+})();
+</script>
+</body>
+</html>
