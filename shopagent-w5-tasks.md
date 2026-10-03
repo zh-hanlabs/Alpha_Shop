@@ -71,7 +71,7 @@ spring.ai.model.embedding: dashscope  # 向量走 DashScope
 
 `searchKnowledge(query)` → `service/KnowledgeService.search`：
 
-1. **召回**：query 向量化 → top-k（k=5），相似度阈值截断（起点 0.5，D2 冒烟实测定稿）
+1. **召回**：query 向量化 → top-k（k=5），相似度阈值截断（起点 0.5，D2 冒烟实测定稿）【D2 实测定稿：维持 0.5——10 条冒烟命中分 0.73-0.95（正确文档 top1 ≥0.87），无关问题（天气）Prompt 路由直接零工具调用，未出现 0.5-0.7 灰色地带的垃圾召回，安全余量充足】
 2. **重排**：轻量规则重排——查询词与商品名/文档标题的精确或包含命中加权 + 向量分，取 top-3。**不引独立 reranker 模型**：几十条规模多一次 API 调用不值，且「重排要不要上模型」本身就是按规模分层的面试叙事
 3. **注入**：top-3 结构化进 `ToolResult.data`，模型组织自然语言回答；零召回（阈值下全 miss）→ notFound「知识库没有覆盖这个问题」，模型诚实告知并引导
 
@@ -142,10 +142,10 @@ spring.ai.model.embedding: dashscope  # 向量走 DashScope
 
 ### D2：检索工具 + RAG 链路
 
-- [ ] T2.1 `service/KnowledgeService`：召回 top-5 → 阈值截断 → 规则重排 top-3 → 结构化 data
-- [ ] T2.2 `tools/query/KnowledgeSearchTool` + ToolEvents「正在查询知识库」+ System Prompt 路由段更新
-- [ ] T2.3 LLM 冒烟 ≥8 条（含链式调用、无关问题零注入），阈值按实测定稿回填本清单
-- [ ] T2.4 单测：重排加权规则 / 阈值截断 / fail-open 降级（mock VectorStore）
+- [x] T2.1 `service/KnowledgeService`：召回 top-5 → 阈值截断 → 规则重排 top-3 → 结构化 data——重排=向量分打底 + 标题整句命中 +0.30 / bigram 命中比例 ×0.10（中文无分词的确定性字面匹配），data 含 title/content/source/docType/productId/score
+- [x] T2.2 `tools/query/KnowledgeSearchTool` + ToolEvents「正在查询知识库」+ System Prompt 路由段更新——路由分工写进工具 description 与 Prompt 专节；query 长度白名单 ≤100 防整段对话历史入检索
+- [x] T2.3 LLM 冒烟 ≥8 条（含链式调用、无关问题零注入），阈值按实测定稿回填本清单——10/10 PASS（证据 `docs/rag/smoke-w5d2.txt` + 应用日志）：8 条事实全准（IPX5/100Wh/7天/42dB…）、链式用例 searchKnowledge→searchProduct×2 完整走通、天气用例**零工具调用**纯边界话术；`searchKnowledge` 全程 9 次调用零编造零 notFound 误报
+- [x] T2.4 单测：重排加权规则 / 阈值截断 / fail-open 降级（mock VectorStore）——新增 7 个（整句命中反超、bigram 按比例弱加权、top-N 截断、单字退化纯向量分、结构化 data、零召回 notFound、故障 error 不外抛），`mvn test` 80/80
 
 ### D3：两级缓存 + 一致性
 
