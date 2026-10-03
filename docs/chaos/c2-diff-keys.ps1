@@ -14,6 +14,9 @@ $baseline = Stats $userId $productId
 $out += "=== C2 baseline ==="
 $out += ("stock={0} orderCount={1} (user={2}, product={3})" -f $baseline.stock, $baseline.orderCount, $userId, $productId)
 
+# 场景键空间隔离：清掉此前场景的幂等键（H2 是事实源，Redis 仅幂等标记）
+docker exec shopagent-redis redis-cli FLUSHDB | Out-Null
+
 $conversationId = 'chaos-c2-20261003'
 
 $jobs = @()
