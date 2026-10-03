@@ -131,7 +131,7 @@ spring.ai.model.embedding: dashscope  # 向量走 DashScope
   - 实测：SAA 路由键非标准（`embedding.text` 非 `embedding`）且各条件 matchIfMissing=true → 三键组合 `chat=openai`+`embedding=none`+`embedding.text=dashscope` 才互斥；Redis 向量库自动装配有 `@ConditionalOnBean(JedisConnectionFactory)` 守卫，Redisson 不提供 → 本阶段静默跳过零冲突，Jedis 接线留 D1
   - graph-core 取 1.1.2.4-security-fix（中央仓 1.1.2 线最新，与 starter 同线）
   - Redis Stack 镜像获取踩四连坑后走「宿主机下 deb（jammy 7.4.0-v8，SHA256 校验）+ 多阶段构建零网络」，证据见 README 踩坑实录 7；新容器 MODULE LIST 六模块全载，FT.CREATE 向量索引冒烟过；C1 回归 PASS（10/10 同键同订单号、1 新单、库存 -1）
-- [x] T0.4 文档：.env.example 双 Key、README 快速启动（双 Key + Redis Stack 自建镜像可复现命令 + SHA256）、技术栈行、模型切换章节。⚠️ `AI_DASHSCOPE_API_KEY` 本机尚未设置（用户级环境变量空）——D1 真 embedding 灌库冒烟前需用户提供，单测用 mock 不受阻
+- [x] T0.4 文档：.env.example 双 Key、README 快速启动（双 Key + Redis Stack 自建镜像可复现命令 + SHA256）、技术栈行、模型切换章节。`AI_DASHSCOPE_API_KEY` 已就位（2026-10-03 setx 用户级环境变量，密钥不落任何仓库文件），实测有效：compatible-mode embeddings 返回 200 / text-embedding-v4 / **1024 维**，与 §2.2 设计定稿基准一致（D1 `FT.INFO` 校验即对此）
 
 ### D1：知识库构建
 
