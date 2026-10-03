@@ -1,6 +1,7 @@
 package com.shopagent.tools.trade;
 
 import com.shopagent.infra.guard.TradeGuard;
+import com.shopagent.infra.guard.TradeRequest;
 import com.shopagent.infra.idempotent.IdempotentKeys;
 import com.shopagent.infra.lock.LockKeys;
 import com.shopagent.service.OrderActionOutcome;
@@ -49,7 +50,10 @@ public class CancelOrderTool {
         }
         ToolEvents.publish(toolContext, "正在取消订单 " + orderNo);
         String idempotentKey = IdempotentKeys.orderAction("cancel", userId, orderNo);
-        return tradeGuard.execute(LockKeys.order(userId, orderNo), idempotentKey, () -> {
+        return tradeGuard.execute(
+                new TradeRequest(userId, "cancel", orderNo,
+                        LockKeys.order(userId, orderNo), idempotentKey),
+                () -> {
             try {
                 OrderActionOutcome outcome = tradeService.cancel(userId, orderNo);
                 return switch (outcome.status()) {

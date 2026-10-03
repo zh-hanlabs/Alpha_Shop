@@ -1,6 +1,7 @@
 package com.shopagent.tools.trade;
 
 import com.shopagent.infra.guard.TradeGuard;
+import com.shopagent.infra.guard.TradeRequest;
 import com.shopagent.infra.idempotent.IdempotentKeys;
 import com.shopagent.infra.lock.LockKeys;
 import com.shopagent.service.OrderActionOutcome;
@@ -50,7 +51,10 @@ public class RefundOrderTool {
         }
         ToolEvents.publish(toolContext, "正在为订单 " + orderNo + " 申请退款");
         String idempotentKey = IdempotentKeys.orderAction("refund", userId, orderNo);
-        return tradeGuard.execute(LockKeys.order(userId, orderNo), idempotentKey, () -> {
+        return tradeGuard.execute(
+                new TradeRequest(userId, "refund", orderNo,
+                        LockKeys.order(userId, orderNo), idempotentKey),
+                () -> {
             try {
                 OrderActionOutcome outcome = tradeService.refund(userId, orderNo);
                 return switch (outcome.status()) {

@@ -3,9 +3,11 @@ package com.shopagent.controller;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.shopagent.entity.Order;
 import com.shopagent.entity.Product;
+import com.shopagent.entity.TradeAuditLog;
 import com.shopagent.infra.idempotent.IdempotentKeys;
 import com.shopagent.mapper.OrderMapper;
 import com.shopagent.mapper.ProductMapper;
+import com.shopagent.mapper.TradeAuditLogMapper;
 import com.shopagent.tools.query.OrderQueryTool;
 import com.shopagent.tools.support.ToolContextKeys;
 import com.shopagent.tools.support.ToolResult;
@@ -22,6 +24,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -41,16 +44,19 @@ public class DevChaosController {
     private final OrderQueryTool orderQueryTool;
     private final ProductMapper productMapper;
     private final OrderMapper orderMapper;
+    private final TradeAuditLogMapper auditLogMapper;
 
     public DevChaosController(PlaceOrderTool placeOrderTool, RefundOrderTool refundOrderTool,
                               CancelOrderTool cancelOrderTool, OrderQueryTool orderQueryTool,
-                              ProductMapper productMapper, OrderMapper orderMapper) {
+                              ProductMapper productMapper, OrderMapper orderMapper,
+                              TradeAuditLogMapper auditLogMapper) {
         this.placeOrderTool = placeOrderTool;
         this.refundOrderTool = refundOrderTool;
         this.cancelOrderTool = cancelOrderTool;
         this.orderQueryTool = orderQueryTool;
         this.productMapper = productMapper;
         this.orderMapper = orderMapper;
+        this.auditLogMapper = auditLogMapper;
     }
 
     public record ChaosPlaceRequest(String userId, long productId, int quantity,
@@ -99,6 +105,17 @@ public class DevChaosController {
         result.put("stock", product == null ? null : product.getStock());
         result.put("orderCount", orderCount);
         return result;
+    }
+
+    // 审计查询：按用户倒序取最近 N 条（重放场景两条记录同 idempotent_key 的一手验证）
+    @GetMapping("/audit")
+    public List<TradeAuditLog> audit(@RequestParam String userId,
+                                     @RequestParam(defaultValue = "10") int limit) {
+        int bounded = Math.min(Math.max(limit, 1), 100);
+        return auditLogMapper.selectList(Wrappers.<TradeAuditLog>lambdaQuery()
+                .eq(TradeAuditLog::getUserId, userId)
+                .orderByDesc(TradeAuditLog::getId)
+                .last("LIMIT " + bounded));
     }
 
     // 镜像 ChatController.buildToolContext：同样的键构造，保证混沌路径与 LLM 路径幂等键口径一致

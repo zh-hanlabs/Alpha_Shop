@@ -42,3 +42,17 @@ CREATE TABLE IF NOT EXISTS logistics (
     updated_at  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
     CONSTRAINT uk_logistics_order UNIQUE (order_no)
 );
+
+-- W4D3 交易审计：谁在何时以哪个幂等键做了什么、结果如何（重放场景两条记录同 idempotent_key）
+CREATE TABLE IF NOT EXISTS trade_audit_log (
+    id            BIGINT AUTO_INCREMENT PRIMARY KEY,
+    user_id       VARCHAR(20)  NOT NULL,
+    action        VARCHAR(20)  NOT NULL,
+    order_no      VARCHAR(20),
+    idempotent_key VARCHAR(64) NOT NULL,
+    result_code   INT          NOT NULL,
+    result_msg    VARCHAR(255),
+    created_at    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_audit_user_time ON trade_audit_log (user_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_idem_key ON trade_audit_log (idempotent_key);

@@ -1,6 +1,7 @@
 package com.shopagent.tools.trade;
 
 import com.shopagent.infra.guard.TradeGuard;
+import com.shopagent.infra.guard.TradeRequest;
 import com.shopagent.infra.idempotent.IdempotentKeys;
 import com.shopagent.infra.lock.LockKeys;
 import com.shopagent.service.PlaceOutcome;
@@ -67,8 +68,11 @@ public class PlaceOrderTool {
         ToolEvents.publish(toolContext, "正在下单，商品 id " + productId + " × " + qty);
         String idempotentKey = IdempotentKeys.placeOrder(userId, productIdValue, qty, conversationId, instructionDigest);
         // 完整闸序（§2.3，TradeGuard 编排）：result 快查(锁外) → 抢锁(3s) → 锁内幂等 → finally 解锁。
-        // 锁防并发双写，幂等防锁释放后的重放——双保险缺一不可
-        return tradeGuard.execute(LockKeys.placeOrder(userId, productIdValue), idempotentKey, () -> {
+        // 锁防并发双写，幂等防锁释放后的重放——双保险缺一不可；orderNo 此时尚不存在，审计留空
+        return tradeGuard.execute(
+                new TradeRequest(userId, "placeOrder", null,
+                        LockKeys.placeOrder(userId, productIdValue), idempotentKey),
+                () -> {
             try {
                 PlaceOutcome outcome = tradeService.place(userId, productIdValue, qty);
                 return switch (outcome.status()) {
