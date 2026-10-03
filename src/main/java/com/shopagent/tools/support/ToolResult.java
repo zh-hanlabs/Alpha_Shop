@@ -10,6 +10,8 @@ public record ToolResult(int code, String msg, Object data) {
     public static final int CODE_SUCCESS = 0;
     public static final int CODE_BAD_PARAM = 40001;
     public static final int CODE_NOT_FOUND = 40401;
+    // W3 交易专用：请求合法但被业务规则拒绝（库存不足/状态不可办），区别于参数错和查无
+    public static final int CODE_BUSINESS_REJECT = 40901;
     public static final int CODE_ERROR = 50001;
 
     public static ToolResult ok(Object data) {
@@ -22,6 +24,10 @@ public record ToolResult(int code, String msg, Object data) {
 
     public static ToolResult notFound(String msg) {
         return new ToolResult(CODE_NOT_FOUND, msg, null);
+    }
+
+    public static ToolResult reject(String msg) {
+        return new ToolResult(CODE_BUSINESS_REJECT, msg, null);
     }
 
     public static ToolResult error(String msg) {
