@@ -4,7 +4,9 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shopagent.entity.Logistics;
+import com.shopagent.entity.Order;
 import com.shopagent.mapper.LogisticsMapper;
+import com.shopagent.mapper.OrderMapper;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
@@ -13,10 +15,12 @@ import java.util.List;
 public class LogisticsService {
 
     private final LogisticsMapper logisticsMapper;
+    private final OrderMapper orderMapper;
     private final ObjectMapper objectMapper;
 
-    public LogisticsService(LogisticsMapper logisticsMapper, ObjectMapper objectMapper) {
+    public LogisticsService(LogisticsMapper logisticsMapper, OrderMapper orderMapper, ObjectMapper objectMapper) {
         this.logisticsMapper = logisticsMapper;
+        this.orderMapper = orderMapper;
         this.objectMapper = objectMapper;
     }
 
@@ -30,7 +34,14 @@ public class LogisticsService {
             String status,
             List<TrackPoint> tracks) {}
 
-    public LogisticsDetail queryLogistics(String orderNo) {
+    public LogisticsDetail queryLogistics(String orderNo, String userId) {
+        // 物流轨迹按订单归属放行：他人订单与不存在同样返回 null，不泄露订单存在性
+        Order order = orderMapper.selectOne(Wrappers.<Order>lambdaQuery()
+                .eq(Order::getOrderNo, orderNo)
+                .eq(Order::getUserId, userId));
+        if (order == null) {
+            return null;
+        }
         Logistics logistics = logisticsMapper.selectOne(
                 Wrappers.<Logistics>lambdaQuery().eq(Logistics::getOrderNo, orderNo));
         if (logistics == null) {

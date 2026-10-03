@@ -16,7 +16,7 @@ class OrderServiceTest {
 
     @Test
     void queryOrderDetail_returns_order_with_items() {
-        OrderDetail detail = orderService.queryOrderDetail("10001");
+        OrderDetail detail = orderService.queryOrderDetail("10001", "u1001");
 
         assertThat(detail).isNotNull();
         assertThat(detail.status()).isEqualTo("SHIPPED");
@@ -33,7 +33,14 @@ class OrderServiceTest {
 
     @Test
     void queryOrderDetail_returns_null_when_not_found() {
-        assertThat(orderService.queryOrderDetail("99999")).isNull();
+        assertThat(orderService.queryOrderDetail("99999", "u1001")).isNull();
+    }
+
+    @Test
+    void queryOrderDetail_rejects_other_users_order() {
+        // 10006 属于 u1002：u1001 查询必须返回 null（与不存在不可区分，不泄露存在性）
+        assertThat(orderService.queryOrderDetail("10006", "u1001")).isNull();
+        assertThat(orderService.queryOrderDetail("10006", "u1002")).isNotNull();
     }
 
     @Test

@@ -40,9 +40,12 @@ public class OrderService {
                 .toList();
     }
 
-    public OrderDetail queryOrderDetail(String orderNo) {
+    // 归属条件并入同一条查询：订单不存在与他人订单对调用方不可区分，不泄露订单存在性
+    public OrderDetail queryOrderDetail(String orderNo, String userId) {
         Order order = orderMapper.selectOne(
-                Wrappers.<Order>lambdaQuery().eq(Order::getOrderNo, orderNo));
+                Wrappers.<Order>lambdaQuery()
+                        .eq(Order::getOrderNo, orderNo)
+                        .eq(Order::getUserId, userId));
         if (order == null) {
             return null;
         }

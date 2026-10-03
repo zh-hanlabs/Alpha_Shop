@@ -25,13 +25,13 @@ public class RecentOrdersTool {
     @Tool(description = "查询当前用户最近的订单列表（最多5条，按下单时间倒序）。当用户说「我的订单」「我最近的订单」「我都买过什么」，" +
             "或提到某个订单但没提供订单号时调用。无需任何参数。")
     public ToolResult recentOrders(ToolContext toolContext) {
-        Object userId = toolContext.getContext().get(ToolContextKeys.USER_ID);
-        if (userId == null || userId.toString().isBlank()) {
+        String userId = ToolContextKeys.userId(toolContext);
+        if (userId == null) {
             return ToolResult.error("用户身份缺失，无法查询订单");
         }
         ToolEvents.publish(toolContext, "正在查询您的最近订单");
         try {
-            return ToolResult.ok(orderService.recentOrders(userId.toString()));
+            return ToolResult.ok(orderService.recentOrders(userId));
         } catch (Exception e) {
             log.error("recentOrders failed, userId={}", userId, e);
             return ToolResult.error("订单查询失败，请稍后再试");
