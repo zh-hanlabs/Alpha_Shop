@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.util.List;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 @SpringBootTest
@@ -32,5 +34,29 @@ class OrderServiceTest {
     @Test
     void queryOrderDetail_returns_null_when_not_found() {
         assertThat(orderService.queryOrderDetail("99999")).isNull();
+    }
+
+    @Test
+    void recentOrders_returns_latest_first_for_user() {
+        List<OrderService.OrderSummary> orders = orderService.recentOrders("u1001");
+
+        assertThat(orders).hasSize(5);
+        // 10003 是 3 小时前下的单，应排最前
+        assertThat(orders.get(0).orderNo()).isEqualTo("10003");
+        assertThat(orders.get(0).status()).isEqualTo("PENDING_PAYMENT");
+        assertThat(orders).allSatisfy(o -> assertThat(o.createdAt()).matches("\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2}"));
+    }
+
+    @Test
+    void recentOrders_is_scoped_by_user() {
+        List<OrderService.OrderSummary> orders = orderService.recentOrders("u1002");
+
+        assertThat(orders).hasSize(1);
+        assertThat(orders.get(0).orderNo()).isEqualTo("10006");
+    }
+
+    @Test
+    void recentOrders_returns_empty_for_unknown_user() {
+        assertThat(orderService.recentOrders("nobody")).isEmpty();
     }
 }

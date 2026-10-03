@@ -26,7 +26,7 @@ public class OrderQueryTool {
     }
 
     @Tool(description = "查询订单详情。当用户询问某个订单的金额、商品明细、状态、下单时间、买了什么时调用。" +
-            "参数 orderId 为订单号，纯数字字符串。用户没提供订单号时，先礼貌请用户提供订单号，不要调用本工具。")
+            "参数 orderId 为订单号，纯数字字符串。用户没给订单号但提到「我的订单」时，先用 recentOrders 查最近订单。")
     public ToolResult queryOrder(@ToolParam(description = "订单号，纯数字，例如 10001") String orderId) {
         if (orderId == null || !ORDER_NO_PATTERN.matcher(orderId).matches()) {
             return ToolResult.badParam("订单号格式不正确，应为纯数字");
