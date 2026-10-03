@@ -1,5 +1,6 @@
 package com.shopagent.config;
 
+import com.shopagent.tools.query.LogisticsQueryTool;
 import com.shopagent.tools.query.OrderQueryTool;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
@@ -31,13 +32,14 @@ public class ChatClientConfig {
     }
 
     @Bean
-    public ChatClient chatClient(ChatClient.Builder builder, ChatMemory chatMemory, OrderQueryTool orderQueryTool) {
+    public ChatClient chatClient(ChatClient.Builder builder, ChatMemory chatMemory,
+                                  OrderQueryTool orderQueryTool, LogisticsQueryTool logisticsQueryTool) {
         return builder
                 .defaultSystem(SYSTEM_PROMPT)
                 .defaultAdvisors(
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         new SimpleLoggerAdvisor())
-                .defaultTools(orderQueryTool)
+                .defaultTools(orderQueryTool, logisticsQueryTool)
                 .build();
     }
 }
