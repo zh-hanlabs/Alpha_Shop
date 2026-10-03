@@ -31,7 +31,7 @@ JDK 17+ / Spring Boot 3.5.x / Spring AI Alibaba 1.x（当前 1.1.2.4-security-fi
 
 ## 代码约定
 
-- 包结构：`com.shopagent.{config, controller, agent, tools, service, infra}`
+- 包结构：`com.shopagent.{config, controller, agent, tools, service, infra, entity, mapper}`（W1D3 起含数据层 entity/mapper）
 - 工具类后缀 `Tool`，业务类后缀 `Service`
 - tools/ 只做参数校验和编排，业务逻辑进 service/，横切能力进 infra/
 - 注释只写 Why 不写 What；魔法数字进常量类

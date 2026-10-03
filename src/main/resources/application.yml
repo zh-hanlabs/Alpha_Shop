@@ -10,6 +10,10 @@ spring:
   h2:
     console:
       enabled: true   # 开发调试用：/h2-console（JDBC URL 同上）
+  sql:
+    init:
+      # Windows 默认 GBK 读 UTF-8 脚本会把中文 mock 数据读成乱码，必须显式声明
+      encoding: UTF-8
   ai:
     openai:
       # DeepSeek 兼容 OpenAI 协议；切回通义见 README「模型切换」
