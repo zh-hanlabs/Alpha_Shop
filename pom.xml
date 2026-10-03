@@ -48,6 +48,31 @@
             <artifactId>redisson-spring-boot-starter</artifactId>
             <version>3.52.0</version>
         </dependency>
+        <!-- W5 依赖报备（shopagent-w5-tasks.md §三，对照主计划 §1 禁止清单全部合规）：
+             ① Redis Stack 向量库（§1 预批"W5 引入"，传递引入 Jedis，与 Redisson 职责分离并存） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-vector-store-redis</artifactId>
+        </dependency>
+        <!-- ② DashScope embedding 提供方（§1 技术栈基线锁定项；DeepSeek 无 embedding 端点，
+             双模型共存靠 spring.ai.model.chat/embedding 路由，见 §2.1 设计定稿） -->
+        <dependency>
+            <groupId>com.alibaba.cloud.ai</groupId>
+            <artifactId>spring-ai-alibaba-starter-dashscope</artifactId>
+            <version>1.1.2.4-security-fix</version>
+        </dependency>
+        <!-- ③ Graph 编排（§1 工程结构注释"agent/ W1 直连 → W5 迁 Graph"；单 Agent 状态图，
+             非禁止清单所指多 Agent 编排框架；版本与 SAA starter 同线） -->
+        <dependency>
+            <groupId>com.alibaba.cloud.ai</groupId>
+            <artifactId>spring-ai-alibaba-graph-core</artifactId>
+            <version>1.1.2.4-security-fix</version>
+        </dependency>
+        <!-- ④ 两级缓存 L1（W5 §2.4 方案A），版本由 Boot parent 管理 -->
+        <dependency>
+            <groupId>com.github.ben-manes.caffeine</groupId>
+            <artifactId>caffeine</artifactId>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

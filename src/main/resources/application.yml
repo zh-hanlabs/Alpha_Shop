@@ -16,11 +16,22 @@ spring:
       encoding: UTF-8
   data:
     redis:
-      # Redisson 单机模式读取处（W3 幂等+锁）；本地容器：docker run -d --name shopagent-redis -p 6379:6379 redis:7-alpine
+      # Redisson 单机模式读取处（W3 幂等+锁）；W5D0 起换 Redis Stack（向量库同实例，§2.2）：
+      # docker run -d --name shopagent-redis -p 6379:6379 shopagent/redis-stack-server:7.4.0-v8
       # 交易安全语义是 fail-closed：Redis 不可用应用拒绝启动，宁可不做交易不可重复执行
       host: localhost
       port: 6379
   ai:
+    # W5D0 双模型共存路由（§2.1 定稿）：chat 走 DeepSeek，embedding 走 DashScope。
+    # 三个键都是精确条件键（javap 实证 1.1.2.4-security-fix）：
+    #   OpenAI chat/embedding 装配条件 = spring.ai.model.chat / spring.ai.model.embedding（havingValue=openai）
+    #   SAA DashScope chat 条件 = spring.ai.model.chat（havingValue=dashscope）
+    #   SAA DashScope embedding 条件 = spring.ai.model.embedding.text（havingValue=dashscope，注意不是标准键）
+    # matchIfMissing 均 true，所以 embedding 必须显式 none 关掉 openai 侧，否则容器里出现两个 EmbeddingModel 冲突
+    model:
+      chat: openai
+      embedding: none
+      "embedding.text": dashscope
     openai:
       # DeepSeek 兼容 OpenAI 协议；切回通义见 README「模型切换」
       # dummy 默认值：让 mvn test 等不调模型的场景无需配置真实 Key 也能启动
@@ -29,6 +40,19 @@ spring:
       chat:
         options:
           model: deepseek-chat
+    dashscope:
+      # embedding 专用 Key（DeepSeek 无 embedding 端点，向量能力必须第二提供方，§2.1）
+      api-key: ${AI_DASHSCOPE_API_KEY:dummy}
+      embedding:
+        options:
+          # SAA 1.1.2.4 默认 text-embedding-v3，§2.1 定稿 v4（1024 维）；切模型=维度变=索引必须重建
+          model: text-embedding-v4
+    vectorstore:
+      redis:
+        index-name: shopagent-knowledge
+        prefix: "knowledge:"
+        # 索引创建/维度校验由 D1 KnowledgeIndexer 交给 FT.INFO 管理，启动不建索引（防 dummy Key 下调 API）
+        initialize-schema: false
 
 # SimpleLoggerAdvisor 决策日志级别：W7 压测与问题定位的数据来源
 logging:

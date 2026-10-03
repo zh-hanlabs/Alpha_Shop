@@ -6,3 +6,4 @@ target/
 .vscode/
 .env
 PUSH_LOG.md
+docker/redis-stack-server/*.deb

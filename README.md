@@ -45,19 +45,26 @@ flowchart LR
 
 ## 技术栈
 
-JDK 17+ · Spring Boot 3.5.x · Spring AI 1.1.x · DeepSeek（当前接入，OpenAI 兼容协议）· MyBatis-Plus · H2 · Redis + Redisson 3.52（W3 起幂等/锁）· 原生单页前端（零 Node 构建）
+JDK 17+ · Spring Boot 3.5.x · Spring AI 1.1.x · DeepSeek（聊天，OpenAI 兼容协议）+ DashScope（embedding，W5 起）· MyBatis-Plus · H2 · Redis + Redisson 3.52（W3 起幂等/锁）· Redis Stack 向量库 + Caffeine 两级缓存（W5 起）· 原生单页前端（零 Node 构建）
 
 ## 快速启动
 
 ```bash
 # 1. 配置模型 API Key，只走环境变量，勿写入任何文件
+#    W5 起双 Key：聊天走 DeepSeek，向量/embedding 走 DashScope（DeepSeek 无 embedding 端点）
 #    Windows PowerShell（当前会话）：
 $env:DEEPSEEK_API_KEY = "sk-xxx"
+$env:AI_DASHSCOPE_API_KEY = "sk-xxx"
 #    Windows（永久，需新开终端生效）：
 setx DEEPSEEK_API_KEY "sk-xxx"
+setx AI_DASHSCOPE_API_KEY "sk-xxx"
 
-# 2. 启动 Redis（W3 起必需：幂等与分布式锁的载体）
-docker run -d --name shopagent-redis -p 6379:6379 redis:7-alpine
+# 2. 启动 Redis（W3 起必需：幂等与分布式锁的载体；W5D0 起换 Redis Stack，向量库同实例）
+#    首次需自建镜像：先由宿主机下载官方 deb（约 59MB，packages.redis.io 国内直连可达；deb 不入 git）
+curl -L -o docker/redis-stack-server/redis-stack-server-7.4.0-v8.jammy.amd64.deb https://packages.redis.io/deb/pool/jammy/r/re/redis-stack-server-7.4.0-v8.jammy.amd64.deb
+#    SHA256 必须等于 b3d88edc0fe9822020ebe9f47f2847df29c1ffd0f41ce7348c7fedc8a959c153（jammy 版，与官方镜像底座同构）
+docker build -t shopagent/redis-stack-server:7.4.0-v8 docker/redis-stack-server
+docker run -d --name shopagent-redis -p 6379:6379 shopagent/redis-stack-server:7.4.0-v8
 #    交易安全语义 fail-closed：Redis 不可用时应用拒绝启动——
 #    宁可不做交易，不可失去幂等保护裸跑
 
@@ -188,12 +195,11 @@ dev-only 直连端点（`@Profile("dev")`）绕过 LLM 直打工具层完整闸�
 
 ## 模型切换
 
-当前接入 DeepSeek（`spring-ai-starter-model-openai`）。切回通义 qwen 时：
+W5D0 起聊天与 embedding 分路由（`spring.ai.model.*` 路由键，双 starter 共存零冲突）：
 
-1. `pom.xml`：换回 `com.alibaba.cloud.ai:spring-ai-alibaba-starter-dashscope`（1.1.2.4-security-fix）
-2. `application.yml`：`spring.ai.openai.*` 段换成 `spring.ai.dashscope.*`，环境变量改用 `AI_DASHSCOPE_API_KEY`
-
-代码零改动——ChatClient / Advisor / Tool 均为 Spring AI 标准抽象。
+- **聊天**：当前 DeepSeek（`spring.ai.model.chat: openai`，OpenAI 兼容协议）。切回通义 qwen：改 `spring.ai.model.chat: dashscope` 并配 `spring.ai.dashscope.*`，代码零改动
+- **embedding**：固定 DashScope `text-embedding-v4`（`spring.ai.model.embedding.text: dashscope`）。两个坑：SAA 的路由键是 `embedding.text` 不是 Spring AI 标准键 `embedding`；且 `spring.ai.model.embedding` 必须显式 `none` 关掉 openai 侧默认装配（各路由条件 matchIfMissing=true），否则容器内出现两个 EmbeddingModel 启动冲突
+- **切 embedding 模型 = 维度变 = 向量索引必须重建**（D1 起由 `FT.INFO` 校验维度一致，见 W5 任务清单 §2.2）
 
 ## 踩坑实录
 
@@ -203,7 +209,8 @@ dev-only 直连端点（`@Profile("dev")`）绕过 LLM 直打工具层完整闸�
 4. **内部工具执行模式工具块不进流**：`.stream()` 只输出 answer 块，「正在查询」事件走 ToolContext 回调旁路推送，与 W3 交易审计埋点同构。
 5. **幂等结果 JSON 往返 BigDecimal scale 变化**：ToolResult 存 Redis 后读出，`59.00` 变 `59.0`——混沌 C3 判定用字符串比较误报「两次金额」。数值语义必须按数值比较，别拿 scale 当身份。
 6. **PowerShell 5 `Invoke-RestMethod` 中文乱码**：无 charset 的 JSON 响应按 ISO-8859-1 解码，中文 msg 内存级 mojibake 且会写进证据文件。修复：按 Latin-1 取回字节再以 UTF-8 还原。
+7. **Redis Stack 镜像获取死局四连坑（W5D0 实录）**：①Docker Hub 官方镜像与十余加速站全不可达（TLS 超时/403/缺层）→ 官方镜像路径死；②改用官方 apt 源 `packages.redis.io` 自建，但 **BuildKit 构建期网络与 run 容器不同路径**（run 容器可达、build 三连败；另两个前置坑：底座无 ca-certificates 致 https 源静默失败、TUN 代理 fake-ip 劫持容器 DNS 需 `--add-host` 钉真实 IP）；③宿主机直连可达后一查包索引：**bookworm 源里根本没有 redis-stack-server 包**——就算 build 网络通了 apt 也会报「无法定位软件包」（包只在 bullseye/jammy 源）；④bullseye 版 deb 链 OpenSSL 1.1（bookworm 底座无 1.1），**选 jammy 版**——与官方 Docker 镜像底座（ubuntu22.04/libssl3）同构，bookworm glibc 2.36 向下兼容。**终极解法：宿主机下载 deb（SHA256 校验）→ 多阶段构建（unpack 阶段 `dpkg -x`，`COPY --from` Linux→Linux 保权限）→ 全程零网络，BuildKit 问题不复存在**。方法论：构建期网络死局优先「把网络操作移出构建」而非「修构建网络」。
 
 ## 当前进度
 
-W4 收官：交易安全三件套（幂等/锁/审计）全链路完成，混沌测试 C1-C4 全 PASS（证据 `docs/chaos/`），README 交易安全设计章节 + 架构图刷新到位。W1-2 MVP（查询工具/SSE/前端/安全边界）已完成，接下来 W5 RAG + 多级缓存（Redis Stack 向量库 + 商品知识库 + Caffeine/Redis 两级缓存）。路线图见 `shopagent-master-plan.md`，W3-4 任务清单见 `shopagent-w3w4-tasks.md`。
+W5 进行中：W5D0 完成（依赖四件落地 + 双模型路由 `chat=openai`+`embedding.text=dashscope` 三键互斥 + Redis Stack 容器自建换装 + C1 混沌回归 PASS）。W4 已收官：交易安全三件套（幂等/锁/审计）全链路完成，混沌测试 C1-C4 全 PASS（证据 `docs/chaos/`），README 交易安全设计章节 + 架构图刷新到位。W1-2 MVP（查询工具/SSE/前端/安全边界）已完成。W5 接下来：知识库构建 → 检索工具 → 两级缓存 → Graph spike。路线图见 `shopagent-master-plan.md`，W5 任务清单见 `shopagent-w5-tasks.md`。

@@ -126,9 +126,12 @@ spring.ai.model.embedding: dashscope  # 向量走 DashScope
 ### D0：设计定稿 + 环境切换（半天-1 天）
 
 - [x] T0.1 用户确认 §2.1 / §2.4 / §2.5 三项裁决，冻结设计定稿，本清单 commit
-- [ ] T0.2 Redis 容器替换 redis:7-alpine → redis-stack-server；幂等/锁快速回归（C1 脚本复跑）确认 W3 能力无损
-- [ ] T0.3 依赖四件落地（版本以中央仓实存为准，`mvn dependency:resolve` 校验）；`spring.ai.model.chat=openai / embedding=dashscope` 路由配置；启动自检双模型共存不冲突（冲突则按 §2.1 后备方案）
-- [ ] T0.4 `AI_DASHSCOPE_API_KEY` 环境变量就位（不落盘）；README 快速启动段更新（双 Key + Redis Stack）
+- [x] T0.2 Redis 容器替换 redis:7-alpine → redis-stack-server；幂等/锁快速回归（C1 脚本复跑）确认 W3 能力无损
+- [x] T0.3 依赖四件落地（版本以中央仓实存为准，`mvn dependency:resolve` 校验）；`spring.ai.model.chat=openai / embedding=dashscope` 路由配置；启动自检双模型共存不冲突（冲突则按 §2.1 后备方案）
+  - 实测：SAA 路由键非标准（`embedding.text` 非 `embedding`）且各条件 matchIfMissing=true → 三键组合 `chat=openai`+`embedding=none`+`embedding.text=dashscope` 才互斥；Redis 向量库自动装配有 `@ConditionalOnBean(JedisConnectionFactory)` 守卫，Redisson 不提供 → 本阶段静默跳过零冲突，Jedis 接线留 D1
+  - graph-core 取 1.1.2.4-security-fix（中央仓 1.1.2 线最新，与 starter 同线）
+  - Redis Stack 镜像获取踩四连坑后走「宿主机下 deb（jammy 7.4.0-v8，SHA256 校验）+ 多阶段构建零网络」，证据见 README 踩坑实录 7；新容器 MODULE LIST 六模块全载，FT.CREATE 向量索引冒烟过；C1 回归 PASS（10/10 同键同订单号、1 新单、库存 -1）
+- [x] T0.4 文档：.env.example 双 Key、README 快速启动（双 Key + Redis Stack 自建镜像可复现命令 + SHA256）、技术栈行、模型切换章节。⚠️ `AI_DASHSCOPE_API_KEY` 本机尚未设置（用户级环境变量空）——D1 真 embedding 灌库冒烟前需用户提供，单测用 mock 不受阻
 
 ### D1：知识库构建
 
