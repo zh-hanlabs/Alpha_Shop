@@ -5,3 +5,4 @@ target/
 .idea/
 .vscode/
 .env
+PUSH_LOG.md
