@@ -1,6 +1,8 @@
 package com.shopagent.controller;
 
+import com.shopagent.infra.idempotent.IdempotentKeys;
 import com.shopagent.tools.support.ToolContextKeys;
+import com.shopagent.tools.support.ToolEventListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -16,6 +18,7 @@ import reactor.core.publisher.Sinks;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Objects;
 
 @RestController
 public class ChatController {
@@ -38,7 +41,7 @@ public class ChatController {
         return chatClient.prompt()
                 .user(request.message())
                 .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, request.conversationId()))
-                .toolContext(Map.of(ToolContextKeys.USER_ID, resolveUserId(request)))
+                .toolContext(buildToolContext(request, null))
                 .call().content();
     }
 
@@ -46,11 +49,8 @@ public class ChatController {
     public Flux<ServerSentEvent<String>> chatStream(@RequestBody ChatRequest request) {
         // 工具执行在模型流内部发生（调用块不进入流），事件经 ToolContext 回调旁路推送
         Sinks.Many<ServerSentEvent<String>> toolEvents = Sinks.many().unicast().onBackpressureBuffer();
-        Map<String, Object> toolContext = new HashMap<>();
-        toolContext.put(ToolContextKeys.USER_ID, resolveUserId(request));
-        toolContext.put(ToolContextKeys.TOOL_EVENT_LISTENER,
-                (com.shopagent.tools.support.ToolEventListener) msg ->
-                        toolEvents.tryEmitNext(ServerSentEvent.builder(msg).event("tool").build()));
+        Map<String, Object> toolContext = buildToolContext(request,
+                msg -> toolEvents.tryEmitNext(ServerSentEvent.builder(msg).event("tool").build()));
 
         Flux<ServerSentEvent<String>> chatEvents = chatClient.prompt()
                 .user(request.message())
@@ -73,6 +73,20 @@ public class ChatController {
                             ServerSentEvent.builder("服务开小差了，请稍后重试～").event("error").build(),
                             ServerSentEvent.builder("[DONE]").event("done").build());
                 });
+    }
+
+    private Map<String, Object> buildToolContext(ChatRequest request, ToolEventListener listener) {
+        Map<String, Object> context = new HashMap<>();
+        context.put(ToolContextKeys.USER_ID, resolveUserId(request));
+        // 会话与指令摘要是交易幂等键的组成部分（W3D3）：缺失时交易工具 fail-closed 拒绝执行
+        context.put(ToolContextKeys.CONVERSATION_ID,
+                Objects.requireNonNullElse(request.conversationId(), ""));
+        context.put(ToolContextKeys.INSTRUCTION_DIGEST,
+                IdempotentKeys.instructionDigest(request.message()));
+        if (listener != null) {
+            context.put(ToolContextKeys.TOOL_EVENT_LISTENER, listener);
+        }
+        return context;
     }
 
     private String resolveUserId(ChatRequest request) {

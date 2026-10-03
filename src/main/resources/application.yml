@@ -14,6 +14,12 @@ spring:
     init:
       # Windows 默认 GBK 读 UTF-8 脚本会把中文 mock 数据读成乱码，必须显式声明
       encoding: UTF-8
+  data:
+    redis:
+      # Redisson 单机模式读取处（W3 幂等+锁）；本地容器：docker run -d --name shopagent-redis -p 6379:6379 redis:7-alpine
+      # 交易安全语义是 fail-closed：Redis 不可用应用拒绝启动，宁可不做交易不可重复执行
+      host: localhost
+      port: 6379
   ai:
     openai:
       # DeepSeek 兼容 OpenAI 协议；切回通义见 README「模型切换」

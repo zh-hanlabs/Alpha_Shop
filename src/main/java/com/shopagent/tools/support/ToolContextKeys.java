@@ -11,6 +11,8 @@ public final class ToolContextKeys {
 
     public static final String USER_ID = "userId";
     public static final String TOOL_EVENT_LISTENER = "toolEventListener";
+    public static final String CONVERSATION_ID = "conversationId";
+    public static final String INSTRUCTION_DIGEST = "instructionDigest";
 
     private ToolContextKeys() {}
 
@@ -18,5 +20,16 @@ public final class ToolContextKeys {
     public static String userId(ToolContext toolContext) {
         Object userId = toolContext.getContext().get(USER_ID);
         return (userId == null || userId.toString().isBlank()) ? null : userId.toString();
+    }
+
+    // 会话与指令摘要是交易幂等键的组成部分（W3D3）：缺失时交易工具 fail-closed 拒绝执行
+    public static String conversationId(ToolContext toolContext) {
+        Object value = toolContext.getContext().get(CONVERSATION_ID);
+        return (value == null || value.toString().isBlank()) ? null : value.toString();
+    }
+
+    public static String instructionDigest(ToolContext toolContext) {
+        Object value = toolContext.getContext().get(INSTRUCTION_DIGEST);
+        return (value == null || value.toString().isBlank()) ? null : value.toString();
     }
 }

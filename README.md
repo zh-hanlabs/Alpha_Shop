@@ -41,7 +41,7 @@ flowchart LR
 
 ## 技术栈
 
-JDK 17+ · Spring Boot 3.5.x · Spring AI 1.1.x · DeepSeek（当前接入，OpenAI 兼容协议）· MyBatis-Plus · H2 · 原生单页前端（零 Node 构建）
+JDK 17+ · Spring Boot 3.5.x · Spring AI 1.1.x · DeepSeek（当前接入，OpenAI 兼容协议）· MyBatis-Plus · H2 · Redis + Redisson 3.52（W3 起幂等/锁）· 原生单页前端（零 Node 构建）
 
 ## 快速启动
 
@@ -52,13 +52,18 @@ $env:DEEPSEEK_API_KEY = "sk-xxx"
 #    Windows（永久，需新开终端生效）：
 setx DEEPSEEK_API_KEY "sk-xxx"
 
-# 2. 启动（Maven Wrapper 免安装，仅需 JDK 17+；H2 内存库自动建表灌数据）
+# 2. 启动 Redis（W3 起必需：幂等与分布式锁的载体）
+docker run -d --name shopagent-redis -p 6379:6379 redis:7-alpine
+#    交易安全语义 fail-closed：Redis 不可用时应用拒绝启动——
+#    宁可不做交易，不可失去幂等保护裸跑
+
+# 3. 启动（Maven Wrapper 免安装，仅需 JDK 17+；H2 内存库自动建表灌数据）
 ./mvnw spring-boot:run
 
-# 3. 打开聊天页（推荐，SSE 流式 + 工具调用可视化）
+# 4. 打开聊天页（推荐，SSE 流式 + 工具调用可视化）
 #    http://localhost:8080/index.html
 
-# 4. 或 curl 验证接口
+# 5. 或 curl 验证接口
 curl -X POST -H "Content-Type: application/json" `
   -d '{"conversationId":"c1","message":"订单 10001 到哪了"}' `
   http://localhost:8080/api/chat
@@ -78,6 +83,8 @@ curl -X POST -H "Content-Type: application/json" `
 
 - **多轮记忆 + 会话隔离**：MessageWindowChatMemory（InMemory，W6 换 Redis），conversationId 路由
 - **4 个查询工具，模型自主决策调用**：订单详情 / 物流轨迹 / 商品搜索 / 最近订单
+- **下单工具（W3D1-2）**：placeOrder 含库存原子扣减防超卖、价格快照、Prompt 二次确认（先复述商品/数量/总价，用户同意才执行）
+- **幂等执行器（W3D3）**：`infra/idempotent/` 显式插闸，幂等键 = sha256(用户+动作+参数+会话+指令摘要)；同键重放返回首次结果而非报错（防 LLM 重试死循环）；Redis 故障时交易 fail-closed
 - **工具调用可视化**：前端实时显示「🔍 正在查询订单 10001…」，回答打字机逐字输出
 - **身份注入防越权**：userId 走 ToolContext，模型无法伪造调用方身份；工具层订单归属校验
 
@@ -115,4 +122,4 @@ curl -X POST -H "Content-Type: application/json" `
 
 ## 当前进度
 
-W1D9：收尾工程化。两周 MVP 已完成 D1–D8（骨架→记忆→数据层→工具→SSE→前端→安全），路线图见 `shopagent-master-plan.md`，任务清单见 `shopagent-w1w2-mvp-tasks.md`。
+W3D3：幂等组件落地（IdempotentExecutor 四态语义 + placeOrder 回接）。W1-2 MVP（查询工具/SSE/前端/安全边界）与 W3D1-2 下单工具已完成，接下来 W3D4 Redisson 分布式锁。路线图见 `shopagent-master-plan.md`，W3-4 任务清单见 `shopagent-w3w4-tasks.md`。
