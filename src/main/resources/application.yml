@@ -1,0 +1,14 @@
+spring:
+  application:
+    name: shopagent
+  ai:
+    dashscope:
+      api-key: ${AI_DASHSCOPE_API_KEY}
+      chat:
+        options:
+          model: qwen-plus   # 调试期可换 qwen-turbo 省钱，验收统一 qwen-plus
+
+# SimpleLoggerAdvisor 决策日志级别：W7 压测与问题定位的数据来源
+logging:
+  level:
+    org.springframework.ai.chat.client.advisor: DEBUG
