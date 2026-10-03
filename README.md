@@ -6,38 +6,42 @@
 
 ```mermaid
 flowchart LR
-    subgraph 前端
+    subgraph FE["前端"]
         UI[index.html<br/>单页聊天 · SSE 打字机]
     end
-    subgraph 接入层
-        API["POST /api/chat[/stream]<br/>conversationId + userId 注入"]
+    subgraph GATE["接入层"]
+        API["POST /api/chat[/stream]<br/>conversationId + userId + 指令摘要注入"]
     end
-    subgraph Agent 层
+    subgraph AGENT["Agent 层"]
         CC[ChatClient<br/>System Prompt + 记忆 Advisor]
         MEM[ChatMemory<br/>InMemory · W6 换 Redis]
     end
-    subgraph 工具层
-        OT[queryOrder]
-        LT[queryLogistics]
-        PT[searchProduct]
-        RT[recentOrders]
+    subgraph TOOLS["工具层 · userId 走 ToolContext 注入"]
+        QT["查询工具<br/>queryOrder · queryLogistics<br/>searchProduct · recentOrders"]
+        TT["交易工具<br/>placeOrder · refundOrder · cancelOrder"]
     end
-    subgraph 业务层
-        OS[OrderService]
-        LS[LogisticsService]
-        PS[ProductService]
+    subgraph GUARD["闸序编排 infra/"]
+        TG["TradeGuard<br/>快查→抢锁→幂等→解锁"]
+        AUD["TradeAuditLogger<br/>审计 · 尽力而为"]
     end
-    DB[(H2 内存库<br/>W7 切 MySQL 8)]
+    subgraph SVC["业务层"]
+        QS["OrderService · LogisticsService<br/>ProductService"]
+        TS["TradeService<br/>原子扣库存 · 状态机"]
+    end
+    H2[("H2 内存库<br/>订单 · 审计日志<br/>W7 切 MySQL 8")]
+    RED[("Redis + Redisson<br/>RLock 分布式锁<br/>幂等 mark/result")]
 
-    UI -->|fetch SSE| API --> CC
-    CC <-->|ReAct 决策| OT & LT & PT & RT
+    UI -->|"fetch SSE"| API --> CC
+    CC <-->|"ReAct 决策"| QT
+    CC <-->|"二次确认后"| TT
     CC <--> MEM
-    OT & RT --> OS --> DB
-    LT --> LS --> DB
-    PT --> PS --> DB
+    QT --> QS --> H2
+    TT --> TG --> TS --> H2
+    TG -.->|"tryLock / SETNX"| RED
+    TG --> AUD --> H2
 ```
 
-**分层铁律**：`tools/` 只做参数校验和编排，业务逻辑进 `service/`，横切能力（幂等/锁/限流）在 `infra/`。工具统一返回 `ToolResult{code, msg, data}`，异常在工具内消化不抛给模型——W3 交易工具在 data 前插「抢锁 → 幂等 → 业务 → 解锁」闸序，调用方零改动。
+**分层铁律**：`tools/` 只做参数校验和编排，业务逻辑进 `service/`，横切能力（幂等/锁/审计）在 `infra/`。工具统一返回 `ToolResult{code, msg, data}`，异常在工具内消化不抛给模型；交易工具经 `TradeGuard` 统一闸序（锁外快查→抢锁→幂等→审计→解锁）后才进业务层——正确性不依赖模型的自觉，闸序写在代码里。
 
 ## 技术栈
 
@@ -197,7 +201,9 @@ dev-only 直连端点（`@Profile("dev")`）绕过 LLM 直打工具层完整闸�
 2. **Prompt 职责边界 vs 用户意图**：测试多轮记忆时让模型复述「暗号 PIZZA123」被拒——不是记忆失效，是 System Prompt 只谈购物话题把无恶意请求也拒了。边界要写「不生硬拒绝，引导回购物场景」。
 3. **SSE 连接不关闭**：`Flux.merge` 等事件通道完成、外层 `doFinally` 又在等流结束——循环等待。工具事件因果上先于回答块，chat 流结束即可关通道。
 4. **内部工具执行模式工具块不进流**：`.stream()` 只输出 answer 块，「正在查询」事件走 ToolContext 回调旁路推送，与 W3 交易审计埋点同构。
+5. **幂等结果 JSON 往返 BigDecimal scale 变化**：ToolResult 存 Redis 后读出，`59.00` 变 `59.0`——混沌 C3 判定用字符串比较误报「两次金额」。数值语义必须按数值比较，别拿 scale 当身份。
+6. **PowerShell 5 `Invoke-RestMethod` 中文乱码**：无 charset 的 JSON 响应按 ISO-8859-1 解码，中文 msg 内存级 mojibake 且会写进证据文件。修复：按 Latin-1 取回字节再以 UTF-8 还原。
 
 ## 当前进度
 
-W4：混沌测试 C1-C4 全 PASS（证据 `docs/chaos/`）+ 交易审计日志落地。W3-W4 交易安全三件套（幂等/锁/审计）全链路完成——下单/退款/取消全工具带完整闸序。W1-2 MVP（查询工具/SSE/前端/安全边界）已完成，接下来 W5 RAG + 多级缓存。路线图见 `shopagent-master-plan.md`，W3-4 任务清单见 `shopagent-w3w4-tasks.md`。
+W4 收官：交易安全三件套（幂等/锁/审计）全链路完成，混沌测试 C1-C4 全 PASS（证据 `docs/chaos/`），README 交易安全设计章节 + 架构图刷新到位。W1-2 MVP（查询工具/SSE/前端/安全边界）已完成，接下来 W5 RAG + 多级缓存（Redis Stack 向量库 + 商品知识库 + Caffeine/Redis 两级缓存）。路线图见 `shopagent-master-plan.md`，W3-4 任务清单见 `shopagent-w3w4-tasks.md`。
