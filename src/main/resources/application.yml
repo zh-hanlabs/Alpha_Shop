@@ -1,10 +1,20 @@
 spring:
   application:
     name: shopagent
+  datasource:
+    # MODE=MySQL：方言对齐 W7 的 MySQL 8 切换，schema.sql 可平移
+    url: jdbc:h2:mem:shopdb;DB_CLOSE_DELAY=-1;MODE=MySQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  h2:
+    console:
+      enabled: true   # 开发调试用：/h2-console（JDBC URL 同上）
   ai:
     openai:
       # DeepSeek 兼容 OpenAI 协议；切回通义见 README「模型切换」
-      api-key: ${DEEPSEEK_API_KEY}
+      # dummy 默认值：让 mvn test 等不调模型的场景无需配置真实 Key 也能启动
+      api-key: ${DEEPSEEK_API_KEY:dummy}
       base-url: ${DEEPSEEK_BASE_URL:https://api.deepseek.com}
       chat:
         options:
