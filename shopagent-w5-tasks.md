@@ -60,7 +60,7 @@ spring.ai.model.embedding: dashscope  # 向量走 DashScope
 - **容器**：`shopagent-redis`（redis:7-alpine，无 RediSearch 模块）→ 替换为 `redis/redis-stack-server`（7.4.x-v 线，D0 以 `docker pull` 实际可得 tag 为准），端口 6379 不变，应用配置零改动
   - 替换即清空：现有幂等 mark/result（TTL 24h）丢失可接受——dev 环境，应用重启即重建，混沌脚本自包含
   - 向量库与幂等/锁**共用同一实例**（demo 规模）；生产应分离——独立故障域 + 独立扩容（面试点）
-- **接入**：`spring-ai-starter-vector-store-redis`（BOM 1.1.2 内），自动装配 `RedisVectorStore`（基于 Jedis）。**Jedis 与 Redisson 并存**：各自连接池互不影响，职责分离（Redisson=锁/幂等/缓存 L2，Jedis=RediSearch FT.*）
+- **接入**：`spring-ai-starter-vector-store-redis`（BOM 1.1.2 内）【W5D1 改定稿：依赖照引（传递 Jedis 6.0.0），`RedisVectorStore` 改**手工构造**——自动装配要求 `JedisConnectionFactory` bean，该位置已被 Redisson 的 redissonConnectionFactory 抢位（Boot 工厂 `@ConditionalOnMissingBean` 让位）而静默跳过（D0 条件报告实证）；且 FLAT 算法与 metadata 字段只有 builder 能配。schema 统一定义在 `KnowledgeIndexSpec`，主 bean（init=false，启动零 API）与 Indexer 重建临时实例（init=true）共用同一构造防双写漂移】。**Jedis 与 Redisson 并存**：各自连接池互不影响，职责分离（Redisson=锁/幂等/缓存 L2，Jedis=RediSearch FT.*）
 - **索引参数**：index-name `shopagent-knowledge`，prefix `knowledge:`，FLAT 算法（几十条规模精确 KNN 足够，HNSW 的近似搜索在小索引无收益还多一层解释成本），metadata：`source`（product/policy）、`productId`、`docType`（faq/spec）
 - **语料**：`src/main/resources/knowledge/*.md`，**只做商品域**（主计划砍单线）：8-10 个商品各 3-5 条 FAQ + 平台政策 8-10 条（退货/换货/保修/运费/支付/发票），合计 ≈ 40 条
   - 文档粒度 = 单条 FAQ（<500 字），**不做递归切分**——切分策略服务规模，几十条规模下整条即最优 chunk
@@ -135,10 +135,10 @@ spring.ai.model.embedding: dashscope  # 向量走 DashScope
 
 ### D1：知识库构建
 
-- [ ] T1.1 语料 40 条：`knowledge/*.md`（8-10 商品 FAQ + 平台政策），商品与 data.sql 对齐（id/名称一致）
-- [ ] T1.2 `infra/rag/KnowledgeIndexer`：指纹比对幂等启动 + 变更全量重建 + 批量分批（≤10/批）+ 失败不阻断启动
-- [ ] T1.3 `FT.INFO` 校验：索引存在、维度 1024、metadata 字段齐全；语料改动重启后确实触发重建
-- [ ] T1.4 单测：指纹比对逻辑 / 分批切片（mock EmbeddingModel，不打真 API）
+- [x] T1.1 语料 40 条：`knowledge/*.md`（8-10 商品 FAQ + 平台政策），商品与 data.sql 对齐（id/名称一致）——8 商品×4 条（3 FAQ+1 规格）+ 政策 2 文件×4 条；含 DoD 关键事实（露营灯 IPX5 不可浸泡、充电宝 100Wh 登机限额、退货 7 天）
+- [x] T1.2 `infra/rag/KnowledgeIndexer`：指纹比对幂等启动 + 变更全量重建 + 批量分批（≤10/批）+ 失败不阻断启动——实测首次构建 40 条 1716ms；重启指纹未变「跳过重建」零 API；改一条 FAQ 重启即触发「语料变更」DROPINDEX DD 全量重建
+- [x] T1.3 `FT.INFO` 校验：索引存在、维度 1024、metadata 字段齐全；语料改动重启后确实触发重建——实测 index_name=shopagent-knowledge / num_docs=40 / FLAT / dim=1024 / COSINE / source·productId·docType 在列
+- [x] T1.4 单测：指纹比对逻辑 / 分批切片（mock EmbeddingModel，不打真 API）——新增 14 个（解析 metadata 映射、docId 确定性、指纹稳定性、25 条切 10/10/5、fail-open 双场景、未知索引空状态），全 mock Jedis/Redisson/EmbeddingModel，`mvn test` 73/73
 
 ### D2：检索工具 + RAG 链路
 

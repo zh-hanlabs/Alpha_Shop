@@ -47,12 +47,8 @@ spring:
         options:
           # SAA 1.1.2.4 默认 text-embedding-v3，§2.1 定稿 v4（1024 维）；切模型=维度变=索引必须重建
           model: text-embedding-v4
-    vectorstore:
-      redis:
-        index-name: shopagent-knowledge
-        prefix: "knowledge:"
-        # 索引创建/维度校验由 D1 KnowledgeIndexer 交给 FT.INFO 管理，启动不建索引（防 dummy Key 下调 API）
-        initialize-schema: false
+    # 向量索引参数（index-name/prefix/FLAT/metadata 字段）在 KnowledgeIndexSpec 统一定义：
+    # 自动装配无法配 FLAT 与 metadata，且依赖被 Redisson 抢位的 JedisConnectionFactory（W5D1 定稿备注）
 
 # SimpleLoggerAdvisor 决策日志级别：W7 压测与问题定位的数据来源
 logging:
