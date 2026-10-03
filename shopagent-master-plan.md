@@ -1,7 +1,7 @@
 # ShopAgent 项目主计划（Vibecoding 总纲）
 
 > 用途：本文件是项目的唯一事实来源（Single Source of Truth）。以后每次用 AI 辅助开发（vibecoding）时，把本文档 + 对应周的任务清单一起喂给 AI，即可冷启动。
-> 配套文件：`shopagent-w1w2-mvp-tasks.md`（W1-2 逐日任务）
+> 配套文件：`shopagent-w1w2-mvp-tasks.md`（W1-2 逐日任务）· `shopagent-w3w4-tasks.md`（W3-4 逐日任务 + 设计定稿）
 > 创建时间：2026-10-03 · 维护规则：每完成一周，更新对应周的「状态」列
 
 ---
@@ -78,8 +78,8 @@ shopagent/
 
 | 周 | 主题 | 核心交付 | 简历价值 | 状态 |
 |---|---|---|---|---|
-| W1-2 | MVP 跑通 | ReAct + 查询工具 + SSE + 聊天页 | 铺垫 | ⬜ |
-| W3-4 | **交易安全（核心）** | 下单/退款工具 + 幂等 + Redisson 锁 | ⭐⭐⭐ | ⬜ |
+| W1-2 | MVP 跑通 | ReAct + 查询工具 + SSE + 聊天页 | 铺垫 | ✅ 2026-10-03 |
+| W3-4 | **交易安全（核心）** | 下单/退款工具 + 幂等 + Redisson 锁 | ⭐⭐⭐ | 🔄 W3 开工 2026-10-03 |
 | W5 | RAG + 缓存 | 商品知识库问答 + 热点多级缓存 | ⭐⭐ | ⬜ |
 | W6 | 稳定性 | LLM 限流熔断降级 + Redis 会话记忆 | ⭐⭐ | ⬜ |
 | W7 | 数字 + 部署 | JMeter 压测 + Docker Compose + H2→MySQL | ⭐⭐ | ⬜ |
