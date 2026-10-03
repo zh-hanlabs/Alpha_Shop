@@ -91,7 +91,7 @@ spring.ai.model.embedding: dashscope  # 向量走 DashScope
 - L1 Caffeine：`maximumSize=500`，`expireAfterWrite=60s`（短 TTL：本地缓存无失效广播，60s 是不一致窗口上限）
 - L2 Redisson RBucket：`cache:product:detail:{id}`，TTL 30min
 - 读路径 L1 → L2 → 库，回填顺序 L2 先 L1 后；L2 故障 fail-open 降级 L1/库（缓存是加速器，不是正确性来源）
-- **热点 key 打标**：访问计数（Redis `INCR` + 周期快照），只做指标暴露不实现调度——数字留给 W7 JMeter 出（面试点：打标是手段，淘汰策略才是调度）
+- **热点 key 打标**：访问计数（Redis `INCR` + 周期快照），只做指标暴露不实现调度——数字留给 W7 JMeter 出（面试点：打标是手段，淘汰策略才是调度）【W5D3 实现口径：L1 未命中（穿透到 L2/库）时 `INCR`+`EXPIRE IF NOT SET`（TTL 1h），「周期快照」随动态调度一并归入 W7——L1 进程内命中不打扰 Redis，口径=跨进程数据访问量】
 
 **一致性演示（dev 端点 `POST /api/dev/cache/update-product`，@Profile("dev")）**：改价走 **Cache Aside 先更库再删缓存**（L1+L2 双删）。面试口径：先删缓存再更库的窗口内，并发读会把旧值回填进缓存（脏数据永久驻留到 TTL）；先更库再删缓存最多容忍一个短暂旧值窗口 = 最终一致。
 
@@ -149,11 +149,11 @@ spring.ai.model.embedding: dashscope  # 向量走 DashScope
 
 ### D3：两级缓存 + 一致性
 
-- [ ] T3.1 `infra/cache/TwoLevelCache`：L1 Caffeine + L2 RBucket，读路径回填、L2 故障降级
-- [ ] T3.2 `ProductService` 详情走缓存（**stock 排除在缓存外**）；searchProduct 列表不缓存（走库）——缓存边界按数据变更特征划
-- [ ] T3.3 dev 端点 `update-product`：先更库再删缓存（L1+L2 双删）演示链
-- [ ] T3.4 一致性冒烟存证 `docs/cache/`：改价→双删→回源新值；同商品二次查询 L1 命中日志
-- [ ] T3.5 单测：回填顺序 / 双删 / L2 故障 fail-open / stock 不进缓存
+- [x] T3.1 `infra/cache/TwoLevelCache`：L1 Caffeine + L2 RBucket，读路径回填、L2 故障降级——泛型组件（ObjectMapper JSON 存 L2，StringCodec 直读可演示）；回填 L2 先 L1 后；L2 读/写故障全部吞掉降级；热点计数随穿透打标
+- [x] T3.2 `ProductService` 详情走缓存（**stock 排除在缓存外**）；searchProduct 列表不缓存（走库）——缓存边界按数据变更特征划：`ProductDetailVO`(record 无 stock 编译期保证) 走两级缓存；新增 `ProductDetailTool`（第 9 工具：详情走缓存 + 库存实时同响应，id 必须来自 searchProduct）；查无商品不缓存负结果
+- [x] T3.3 dev 端点 `update-product`：先更库再删缓存（L1+L2 双删）演示链——`DevCacheController`(@Profile("dev"))：GET product-detail / POST update-product，返回新旧价格
+- [x] T3.4 一致性冒烟存证 `docs/cache/`：改价→双删→回源新值；同商品二次查询 L1 命中日志——实测 59.00→66.00→回源 66.00→还原；日志 L1 hit×3 / cache evict 双删×2 / 重启后 **L2 hit**；热点计数=穿透次数精确一致；Redis 键 JSON 直读 price scale 完好
+- [x] T3.5 单测：回填顺序 / 双删 / L2 故障 fail-open / stock 不进缓存——TwoLevelCacheTest 8 个（全 mock Redisson+真 Caffeine：回填带 TTL、L2 写故障 L1 照常回填、查无不缓存负结果、热点计数口径）+ ProductServiceTest 6 个（@MockitoSpyBean 数 DB 调用：详情二次调用仅 1 次查询、列表两次都走库、updatePrice 回源新值）；`mvn test` 94/94
 
 ### D4：Graph 编排升级（spike 制）
 

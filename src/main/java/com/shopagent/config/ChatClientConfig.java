@@ -3,6 +3,7 @@ package com.shopagent.config;
 import com.shopagent.tools.query.KnowledgeSearchTool;
 import com.shopagent.tools.query.LogisticsQueryTool;
 import com.shopagent.tools.query.OrderQueryTool;
+import com.shopagent.tools.query.ProductDetailTool;
 import com.shopagent.tools.query.ProductSearchTool;
 import com.shopagent.tools.query.RecentOrdersTool;
 import com.shopagent.tools.trade.CancelOrderTool;
@@ -63,7 +64,8 @@ public class ChatClientConfig {
     @Bean
     public ChatClient chatClient(ChatClient.Builder builder, ChatMemory chatMemory,
                                   OrderQueryTool orderQueryTool, LogisticsQueryTool logisticsQueryTool,
-                                  ProductSearchTool productSearchTool, RecentOrdersTool recentOrdersTool,
+                                  ProductSearchTool productSearchTool, ProductDetailTool productDetailTool,
+                                  RecentOrdersTool recentOrdersTool,
                                   KnowledgeSearchTool knowledgeSearchTool,
                                   PlaceOrderTool placeOrderTool, RefundOrderTool refundOrderTool,
                                   CancelOrderTool cancelOrderTool) {
@@ -72,8 +74,8 @@ public class ChatClientConfig {
                 .defaultAdvisors(
                         MessageChatMemoryAdvisor.builder(chatMemory).build(),
                         new SimpleLoggerAdvisor())
-                .defaultTools(orderQueryTool, logisticsQueryTool, productSearchTool, recentOrdersTool,
-                        knowledgeSearchTool, placeOrderTool, refundOrderTool, cancelOrderTool)
+                .defaultTools(orderQueryTool, logisticsQueryTool, productSearchTool, productDetailTool,
+                        recentOrdersTool, knowledgeSearchTool, placeOrderTool, refundOrderTool, cancelOrderTool)
                 .build();
     }
 }
