@@ -68,3 +68,11 @@ resilience:
     # 全局桶：全实例共享 10 次/秒，护 DeepSeek 账号级配额（W7 压测时就是 API 护盾）；三参常驻键
     global-rate: 10
     global-interval: 1s
+    # W6 熔断参数（§2.2 起点，D3 冒烟后回填定稿）：次数滑窗 10 / 失败率 50% /
+    # 满 5 次才评估（防启动期偶发即开）/ OPEN 20s 后半开（demo 节奏，生产 30-60s）/ 半开放行 3 次探测
+    circuit-breaker:
+      sliding-window-size: 10
+      failure-rate-threshold: 50
+      minimum-number-of-calls: 5
+      wait-duration-in-open-state: 20s
+      permitted-calls-in-half-open-state: 3

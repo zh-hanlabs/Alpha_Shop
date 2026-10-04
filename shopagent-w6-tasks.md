@@ -117,11 +117,11 @@
 
 ### D3：熔断 + 降级
 
-- [ ] T3.1 `infra/resilience/LlmCircuitBreaker`（Resilience4j programmatic 封装，§2.2 参数 yml 化）+ chat 节点接线：OPEN 短路不调 LLM 直走降级
-- [ ] T3.2 `RuleFallbackService` 意图分类 ≥5 类 → 话术模板；交易类只引导绝不执行；降级回复走 answer 流前端零改动；persistMemory 照跑
-- [ ] T3.3 `DevResilienceController`（@Profile("dev")）：GET breaker 状态 / POST reset / force-open
-- [ ] T3.4 熔断冒烟（错 base-url 起应用真实故障注入）：前 5 次失败 → OPEN → 规则回复非报错 → 等 20s 半开探测仍失败回 OPEN → reset 模拟恢复 → 正常回答；参数实测定稿回填
-- [ ] T3.5 单测：fallback 规则命中/兜底/交易类引导（mock）、breaker OPEN 短路不调 LLM（mock ChatClient）、半开放行探测
+- [x] T3.1 `infra/resilience/LlmCircuitBreaker`（Resilience4j 2.4 programmatic 封装，参数 yml 化 `resilience.circuit-breaker.*`）+ chat 节点接线：execute 包住整段 LLM 调用（token 流照常走 sink 旁路，熔断器只统计整次调用成败）；OPEN 抛 `CallNotPermittedException` 短路不调 LLM 直走降级；CLOSED 下真实失败记入滑窗后透传同样走降级。实测 API 坑：Builder 是 `slidingWindowType`+`slidingWindowSize` 两方法、迁移方法名 `transitionToForcedOpenState()`、`getNumberOfNotPermittedCalls` 返回 long
+- [x] T3.2 `RuleFallbackService` 意图分类 5 类（交易/订单/物流/商品/兜底）关键词规则命中话术模板；**交易类最先判定**（下单/退款/取消红线：只引导稍后再试，话术无"已下单"等执行性表述——没有 LLM 就没有二次确认链路，绝不规则执行）；降级回复按 4 字/40ms 小片走 answer token 流（SSE 打字机照常前端零改动）；persistMemory 照跑（降级轮进记忆，恢复后 LLM 知道降级期说过什么）
+- [x] T3.3 `DevResilienceController`（@Profile("dev")）：GET /api/dev/resilience/breaker（状态+失败率+滑窗计数+短路次数）/ POST reset（模拟 API 恢复）/ POST force-open（无故障演示 OPEN）
+- [x] T3.4 熔断冒烟全 PASS（docs/resilience/w6d3-circuit-smoke.txt）：段1 错 base-url `http://127.0.0.1:9` 真实故障注入——CLOSED 5 连败（5/5=100%，min5 满）→ **OPEN**；OPEN 短路 0.61s 不发起连接；等 20s 半开放行探测（真实尝试连接 0.55s）仍失败 → **回 OPEN**；段2 桩 LLM 恢复环境——force-open → FORCED_OPEN 下降级回复 SSE 分片照发；persistMemory 照落；reset → CLOSED → 正常回答恢复（history_msgs=6 含降级轮）。参数定稿：§2.2 起点参数实测全部成立不调整
+- [x] T3.5 单测 12 例（全量 128 中 121 绿+7 跳）：fallback 五类命中/交易优先判定/话术无执行性表述/null 安全（5）；熔断器 CLOSED 失败透传+滑窗计数 / 失败率过阈值自动跳 OPEN / OPEN 短路 supplier 不执行 / 半开放行探测成功闭合 / 半开探测失败回 OPEN / reset 与 forceOpen（6）；graph 层 breaker OPEN 短路 verifyNoInteractions(chatClient) + 规则回复走 token 流 + chatMemory.add ×2 记忆照落（1）
 
 ### D4：观测
 

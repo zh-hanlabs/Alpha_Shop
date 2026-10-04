@@ -7,6 +7,9 @@ import com.alibaba.cloud.ai.graph.StateGraph;
 import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
 import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
 import com.alibaba.cloud.ai.graph.serializer.std.SpringAIStateSerializer;
+import com.shopagent.infra.resilience.LlmCircuitBreaker;
+import com.shopagent.infra.resilience.RuleFallbackService;
+import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.ai.chat.client.ChatClient;
@@ -52,15 +55,24 @@ public class ShopAgentGraph {
 
     private final ChatClient chatClient;
     private final ChatMemory chatMemory;
+    private final LlmCircuitBreaker llmCircuitBreaker;
+    private final RuleFallbackService ruleFallbackService;
     private final CompiledGraph compiledGraph;
     // 请求态旁路通道：sink/toolContext 不可序列化，只能随 invocation id 在持有表中传递（见类注释）
     private final Map<String, InvocationContext> invocations = new ConcurrentHashMap<>();
 
     private record InvocationContext(Sinks.Many<String> tokens, Map<String, Object> toolContext) {}
 
-    public ShopAgentGraph(ChatClient chatClient, ChatMemory chatMemory) throws Exception {
+    // 降级回复的流式体感：按小片推进模拟 token 流（§2.2：answer 流照发，前端打字机零改动）
+    private static final int FALLBACK_CHUNK = 4;
+    private static final long FALLBACK_CHUNK_DELAY_MS = 40;
+
+    public ShopAgentGraph(ChatClient chatClient, ChatMemory chatMemory,
+                          LlmCircuitBreaker llmCircuitBreaker, RuleFallbackService ruleFallbackService) throws Exception {
         this.chatClient = chatClient;
         this.chatMemory = chatMemory;
+        this.llmCircuitBreaker = llmCircuitBreaker;
+        this.ruleFallbackService = ruleFallbackService;
         StateGraph graph = new StateGraph(() -> {
             Map<String, KeyStrategy> keys = new HashMap<>();
             keys.put(KEY_CONVERSATION_ID, new ReplaceStrategy());
@@ -113,6 +125,13 @@ public class ShopAgentGraph {
         return Map.of(KEY_HISTORY, history);
     }
 
+    /**
+     * W6D3 熔断挂点（§2.2）：execute 包住整段 LLM 调用（token 流照常从 sink 旁路发出，
+     * 熔断器只统计整次调用成败）；OPEN 时 CallNotPermittedException 短路——不发起 LLM 调用直走降级；
+     * CLOSED 下的真实失败（连接拒绝/超时/5xx/流中断）由熔断器记入滑窗后透传，同样走降级。
+     * 两条降级路径都把规则回复当 answer 聚合返回 → persistMemory 节点照跑（降级轮也进记忆，
+     * LLM 恢复后知道降级期说过什么）。
+     */
     private Map<String, Object> chat(OverAllState state) {
         String message = (String) state.value(KEY_MESSAGE).orElse("");
         List<Message> history = state.value(KEY_HISTORY, List.class).orElse(List.of());
@@ -120,6 +139,22 @@ public class ShopAgentGraph {
         if (invocation == null) {
             throw new IllegalStateException("invocation context missing (broken graph invocation)");
         }
+        String answer;
+        try {
+            answer = llmCircuitBreaker.execute(() -> streamAnswer(message, history, invocation));
+        } catch (CallNotPermittedException e) {
+            log.warn("llm breaker OPEN, rule fallback for this turn: conversationId={}",
+                    state.value(KEY_CONVERSATION_ID).orElse(""));
+            answer = streamFallback(message, invocation);
+        } catch (Exception e) {
+            log.warn("llm call failed, rule fallback for this turn: conversationId={}",
+                    state.value(KEY_CONVERSATION_ID).orElse(""), e);
+            answer = streamFallback(message, invocation);
+        }
+        return Map.of(KEY_ANSWER, answer);
+    }
+
+    private String streamAnswer(String message, List<Message> history, InvocationContext invocation) {
         StringBuilder answer = new StringBuilder();
         chatClient.prompt()
                 .messages(history)
@@ -135,7 +170,24 @@ public class ShopAgentGraph {
                     invocation.tokens().tryEmitNext(token);
                 })
                 .blockLast();
-        return Map.of(KEY_ANSWER, answer.toString());
+        return answer.toString();
+    }
+
+    /** 降级回复按意图分类取话术，小片推进模拟 token 流，打字机体感与正常轮一致 */
+    private String streamFallback(String message, InvocationContext invocation) {
+        String reply = ruleFallbackService.reply(message);
+        char[] chars = reply.toCharArray();
+        for (int i = 0; i < chars.length; i += FALLBACK_CHUNK) {
+            int end = Math.min(i + FALLBACK_CHUNK, chars.length);
+            invocation.tokens().tryEmitNext(new String(chars, i, end - i));
+            try {
+                Thread.sleep(FALLBACK_CHUNK_DELAY_MS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            }
+        }
+        return reply;
     }
 
     private Map<String, Object> persistMemory(OverAllState state) {
