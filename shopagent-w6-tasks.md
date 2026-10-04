@@ -111,9 +111,9 @@
 
 ### D2：会话记忆 Redis 化
 
-- [ ] T2.1 `infra/memory/RedisChatMemoryRepository`：hash + 序号 field + Message JSON（codec 复用或自研两态 tag，按 T0.3 结论）+ TTL 7 天写时刷新 + 读写 fail-open
-- [ ] T2.2 ChatClientConfig 换装（MessageWindowChatMemory 挂 Redis repository，窗口 20 默认不变）+ 单测：读写往返 / 窗口截断 / TTL 刷新 / Redis 故障降级 / 跨会话隔离
-- [ ] T2.3 行为等价回归：W1 记忆冒烟清单复跑（连续对话/跨会话隔离/购物场景边界词）+ **重启应用记忆连续冒烟**（对照 W1 重启失忆；Redis 键与 TTL 直读演示存证 docs/resilience/）
+- [x] T2.1 `infra/memory/RedisChatMemoryRepository`：hash `chat:memory:{会话}` + 序号 field + 两态 type-tag JSON（D0 定稿自研）+ TTL 7 天写时刷新 + 读写 fail-open（读→空历史照常聊 / 写→吞掉 log warn）；损坏条目单条跳过不拖垮整窗（降级粒度=单条）
+- [x] T2.2 ChatClientConfig 换装（`chatMemory()` 一处改，W5D4 预留位兑现；`MessageWindowChatMemory.builder().chatMemoryRepository(...)` 窗口 20 默认不变）+ 单测 8 例：读写往返 / 序号乱序重建 / 未知类型与损坏条目单条跳过 / 读故障 fail-open / 写故障不外抛 / 跨会话分键 / 会话扫描剥前缀 / **换装集成窗口截断 25→20**（锁定"只换存储、窗口语义零改动"）——全量 116 中 109 绿+7 跳
+- [x] T2.3 冒烟三 phase 全 PASS（docs/resilience/w6d2-memory-smoke.txt + w6d2-memory-smoke.sh + w6d2-llm-stub.jsh marker 回路桩——桩统计请求体 marker 出现次数与 role 条数做确定性断言，无需真 LLM）：①重启应用同会话 recall **marker_hits=2** = 记忆从 Redis 回来（对照 W1 失忆基线 hits=1，Redis 键随停机幸存）；②跨会话隔离 hits=1 无泄漏；③TTL 写时刷新 604786→604800 重置；④窗口 25 轮（550ms 步进）→ HLEN=20；⑤redis-cli 直读 hash：field=序号、value=`{"type":"USER","content":...}` 可演示。**插曲（降级矩阵活证）**：25 连发未步进被 W6D1 限流闸掐到只剩 3 轮（HLEN=6）——限流在 chat 入口端到端生效的意外实证。W1 清单中依赖 LLM 行为的条目（购物边界词等）待真 Key 环境 D5 复跑
 
 ### D3：熔断 + 降级
 

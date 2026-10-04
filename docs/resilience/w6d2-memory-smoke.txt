@@ -1,0 +1,46 @@
+== T1 store turn (conv=w6d2-mem) ==
+MEMORY-CHECK: marker_hits=1 history_msgs=2
+
+== redis direct read: chat:memory:w6d2-mem ==
+-- HGETALL (field=序号, value=type-tag JSON)
+0
+{"type":"USER","content":"store marker-ab12cd34 here please"}
+1
+{"type":"ASSISTANT","content":"MEMORY-CHECK: marker_hits=1 history_msgs=2"}
+-- HLEN
+2
+-- TTL (seconds, cap 604800 = 7d)
+604799
+
+== APP RESTARTED HERE (key must survive in Redis) ==
+-- HLEN after app stop: 2
+-- TTL after app stop : 604786
+== T2 recall turn AFTER app restart (conv=w6d2-mem) ==
+   (marker_hits=2 -> history came back from Redis; 1 -> amnesia baseline)
+MEMORY-CHECK: marker_hits=2 history_msgs=4
+
+== T3 cross-session isolation (conv=w6d2-other, same marker) ==
+   (expect marker_hits=1: other conversation must not see it)
+MEMORY-CHECK: marker_hits=1 history_msgs=2
+
+== TTL write-time refresh: TTL after T2 write (phase1 TTL was lower by elapsed time) ==
+TTL chat:memory:w6d2-mem = 604800
+
+== window semantics: 25 turns on conv=w6d2-win, then HLEN (expect 20) ==
+HLEN chat:memory:w6d2-win = 6
+TTL chat:memory:w6d2-win  = 604799
+
+== note: unpaced 25-turn loop above was throttled by the W6D1 rate limiter itself (2/1s user bucket) -> only 3 turns persisted (HLEN=6). Window evidence re-taken paced in phase3 ==
+
+== window semantics: 25 paced turns on conv=w6d2-win, then HLEN (expect 20) ==
+HLEN chat:memory:w6d2-win = 20
+TTL chat:memory:w6d2-win  = 604799
+
+=== verdicts ===
+T1 store + redis-cli 直读（序号 field / type-tag JSON / TTL≈7d）: PASS
+T2 recall AFTER restart: marker_hits=2, history_msgs=4 -> 记忆从 Redis 回来了: PASS（对照 W1 失忆基线 hits=1）
+T3 cross-session isolation: marker_hits=1, history_msgs=2 -> 无跨会话泄漏: PASS
+TTL write-time refresh: 604786（停机衰减中）-> 604800（T2 写时重置）: PASS
+window semantics: 25 paced turns -> HLEN=20 : PASS（MessageWindowChatMemory 默认窗口零改动）
+
+口径说明：连续对话/跨会话隔离由 marker 回路桩确定性证明；W1 清单中依赖 LLM 行为的条目（如购物边界词引导）需真 Key 环境，待 D5 收尾复跑；行为等价性由换装点单测（25->20 截断集成）保证——框架 MessageWindowChatMemory 未动，只换存储。

@@ -1,5 +1,6 @@
 package com.shopagent.config;
 
+import com.shopagent.infra.memory.RedisChatMemoryRepository;
 import com.shopagent.tools.query.KnowledgeSearchTool;
 import com.shopagent.tools.query.LogisticsQueryTool;
 import com.shopagent.tools.query.OrderQueryTool;
@@ -54,11 +55,14 @@ public class ChatClientConfig {
             - 与购物无关的话题，一句话说明职责范围并顺势引导回购物，不生硬拒绝、不展开闲聊。
             """;
 
-    // W1 过渡方案：默认 InMemoryChatMemoryRepository，重启即失忆；W6 换 Redis 实现（决策 D5）。
+    // W6D2 决策 D5 兑现：记忆挂 RedisChatMemoryRepository（hash + TTL 7 天写时刷新，§2.3 定稿），
+    // 窗口语义（默认 20 条）仍由 MessageWindowChatMemory 管——换装只换存储，行为零改动。
     // W5D4 起记忆的读写由 ShopAgentGraph 的 loadMemory/persistMemory 节点管理（chatClient 不再挂记忆 Advisor）
     @Bean
-    public ChatMemory chatMemory() {
-        return MessageWindowChatMemory.builder().build();
+    public ChatMemory chatMemory(RedisChatMemoryRepository redisChatMemoryRepository) {
+        return MessageWindowChatMemory.builder()
+                .chatMemoryRepository(redisChatMemoryRepository)
+                .build();
     }
 
     @Bean
