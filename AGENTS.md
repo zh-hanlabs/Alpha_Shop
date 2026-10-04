@@ -37,6 +37,6 @@ JDK 17+ / Spring Boot 3.5.x / Spring AI Alibaba 1.x（当前 1.1.2.4-security-fi
 - 注释只写 Why 不写 What；魔法数字进常量类
 - 用户身份走 ToolContext 注入，工具内不硬编码 userId
 
-## 已定决策（详见主计划 §8，勿推翻）
+## 已定决策（详见主计划 §9，勿推翻）
 
 幂等返回首次结果而非报错（防 LLM 重试死循环）｜锁粒度=用户+订单｜InMemory 记忆 W6 才换 Redis｜向量库用 Redis Stack｜单体模块化不拆微服务｜幂等+锁是简历核心，功能可砍它不可砍

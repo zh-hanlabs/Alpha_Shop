@@ -1,7 +1,7 @@
 # ShopAgent 项目主计划（Vibecoding 总纲）
 
 > 用途：本文件是项目的唯一事实来源（Single Source of Truth）。以后每次用 AI 辅助开发（vibecoding）时，把本文档 + 对应周的任务清单一起喂给 AI，即可冷启动。
-> 配套文件：`shopagent-w1w2-mvp-tasks.md`（W1-2 逐日任务）· `shopagent-w3w4-tasks.md`（W3-4 逐日任务 + 设计定稿）· `shopagent-w5-tasks.md`（W5 逐日任务 + 设计定稿）· `shopagent-w6-tasks.md`（W6 逐日任务 + 设计定稿）
+> 配套文件：`shopagent-w1w2-mvp-tasks.md`（W1-2 逐日任务）· `shopagent-w3w4-tasks.md`（W3-4 逐日任务 + 设计定稿）· `shopagent-w5-tasks.md`（W5 逐日任务 + 设计定稿）· `shopagent-w6-tasks.md`（W6 逐日任务 + 设计定稿）· `shopagent-w7-tasks.md`（W7 逐日任务 + 设计定稿）
 > 创建时间：2026-10-03 · 维护规则：每完成一周，更新对应周的「状态」列
 
 ---
@@ -50,7 +50,7 @@
 ```
 shopagent/
 ├── pom.xml
-├── AGENTS.md              ← W1 Day1 建立：拷贝本文档「§7 开发约定」
+├── AGENTS.md              ← W1 Day1 建立：拷贝本文档「§8 开发约定」
 ├── README.md              ← 架构图 + 启动步骤 + 演示 GIF
 └── src/main/
     ├── java/com/shopagent/
@@ -82,7 +82,7 @@ shopagent/
 | W3-4 | **交易安全（核心）** | 下单/退款工具 + 幂等 + Redisson 锁 | ⭐⭐⭐ | 🔄 W3 开工 2026-10-03 |
 | W5 | RAG + 缓存 | 商品知识库问答 + 热点多级缓存 | ⭐⭐ | ✅ 2026-10-04 |
 | W6 | 稳定性 | LLM 限流熔断降级 + Redis 会话记忆 | ⭐⭐ | ✅ 2026-10-04 |
-| W7 | 数字 + 部署 | JMeter 压测 + Docker Compose + H2→MySQL | ⭐⭐ | ⬜ |
+| W7 | 数字 + 部署 | JMeter 压测 + Docker Compose + H2→MySQL | ⭐⭐ | 🔄 W7 开工 2026-10-04 |
 | W8 | 打磨 | 简历措辞 + 三层追问准备 + commit 整理 | 收口 | ⬜ |
 
 > W1-2 已有逐日清单见 `shopagent-w1w2-mvp-tasks.md`，下文从 W3 起展开。
@@ -171,7 +171,20 @@ Agent 调交易工具的三个风险：
 
 ---
 
-## 7. 开发约定（Vibecoding 规则，W1 拷入仓库 AGENTS.md）
+## 7. W7：数字 + 部署（简历数字收口周，2026-10-04 清单化）
+
+| 任务 | 说明 |
+|---|---|
+| JMeter 压测 | 四组脚本：商品详情缓存链路（冷/热命中对比）/ 交易下单并发（零超卖 + 同键重放）/ 聊天阻塞端点（限流前后对比，桩 LLM）/ SSE 流式（插件）；项目 DoD 两组数字必须落 README |
+| 压测口径 | 桩 LLM=链路吞吐非 LLM 能力（口径声明）+ 真 DeepSeek 小样本延迟参照；取数双源=JMeter JTL/HTML + TurnMetrics 单行 JSON 日志（W6D4 预埋的取数源） |
+| H2→MySQL 8 | 双 profile：dev/单测保持 H2（clone 即跑），新增 mysql profile 供压测与部署；schema 按平台分文件（ADR D8） |
+| Docker Compose | 一条命令拉起全部依赖：redis-stack（本地自建镜像）+ MySQL 8（healthcheck + .env 注入）；app 宿主机跑，容器化为加分项 |
+
+**砍单线**：不做多机分布式压测；不上 Prometheus/Grafana（维持 W6 裁决）；真 LLM 只小样本。逐日任务与设计定稿见 `shopagent-w7-tasks.md`。
+
+---
+
+## 8. 开发约定（Vibecoding 规则，W1 拷入仓库 AGENTS.md）
 
 ### 给 AI 编码助手的行为规则
 
@@ -192,7 +205,7 @@ Agent 调交易工具的三个风险：
 
 ---
 
-## 8. 已定决策记录（ADR-lite，防止 AI 会话反复横跳）
+## 9. 已定决策记录（ADR-lite，防止 AI 会话反复横跳）
 
 | # | 决策 | 理由 | 替代方案（为何不选） |
 |---|---|---|---|
@@ -203,10 +216,11 @@ Agent 调交易工具的三个风险：
 | D5 | InMemory 记忆 W6 才换 Redis | MVP 速度优先，演进有故事 | 一步到位：少一个演进叙事 |
 | D6 | 向量库用 Redis Stack | 不加运维负担 | 独立向量库：超范围 |
 | D7 | 原生单页前端 | 面试官看 Agent 不看 CSS | React：时间黑洞 |
+| D8 | W7 双 profile：H2 留 dev/单测，MySQL 走压测与部署 | clone 即跑保留 + 单测口径零动（D2 落地形态兑现） | 全量切 MySQL：克隆即跑倒退，演示体验劝退 |
 
 ---
 
-## 9. 风险与砍单清单（Scope Guard）
+## 10. 风险与砍单清单（Scope Guard）
 
 | 风险 | 触发信号 | 应对 |
 |---|---|---|
@@ -219,7 +233,7 @@ Agent 调交易工具的三个风险：
 
 ---
 
-## 10. 完成定义（项目级 DoD）
+## 11. 完成定义（项目级 DoD）
 
 8 周结束时：
 - [ ] 演示链路全通：查 → 问 → 办（含退款），带幂等与锁的可视化日志
@@ -231,7 +245,7 @@ Agent 调交易工具的三个风险：
 
 ---
 
-## 11. 每周开工提示词模板（直接复制用）
+## 12. 每周开工提示词模板（直接复制用）
 
 ```
 我在开发 ShopAgent 项目（对话式电商交易 Agent，Spring AI Alibaba）。
