@@ -1,0 +1,20 @@
+W6D1 T1.3 冒烟 · 应用侧两级限流判定日志摘录（/tmp 运行日志 → 仓库存证）
+来源：java -jar 起应用 + w6d1-rate-limit-burst.ps1 四场景（多次运行累计计数）
+
+## 判定行统计（log.info "rate limited at ..."）
+     53 rate limited at user bucket: userId=u1001
+     48 rate limited at user bucket: userId=ub
+     47 rate limited at user bucket: userId=ua
+      3 rate limited at global bucket: userId=burst-11
+      2 rate limited at global bucket: userId=burst-8
+      1 rate limited at global bucket: userId=burst-9
+      1 rate limited at global bucket: userId=burst-6
+      1 rate limited at global bucket: userId=burst-3
+      1 rate limited at global bucket: userId=burst-2
+      1 rate limited at global bucket: userId=burst-12
+      1 rate limited at global bucket: userId=burst-1
+
+## 说明
+- user bucket 拒绝 = 用户桶 2/1s 触发（u1001/ua/ub 各场景累计）
+- global bucket 拒绝 = 全局桶 10/1s 触发（场景 C burst-* 用户：用户桶全新仍被全局拦下）
+- 两级 Verdict 分离记录，W6D4 观测记账（RATE_LIMITED 轮）即取自此口径

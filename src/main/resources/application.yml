@@ -55,3 +55,16 @@ logging:
   level:
     org.springframework.ai.chat.client.advisor: DEBUG
     org.springframework.ai.model.tool: DEBUG
+
+# W6 双层限流参数（设计定稿 shopagent-w6-tasks.md §2.1；D1 冒烟实测定稿：
+# A 同用户 10 连发 2 过 8 拒 / C 12 新用户 10 过 2 拒，证据 docs/resilience/）
+resilience:
+  rate-limit:
+    # 用户桶：每用户 2 次/秒——正常聊天远低于配额，突刺演示 10 连发 2 过 8 拒；
+    # 桶键 1h 空闲自动回收（D0 四参 trySetRate 定稿，TTL 覆盖内部键）
+    user-rate: 2
+    user-interval: 1s
+    user-bucket-ttl: 1h
+    # 全局桶：全实例共享 10 次/秒，护 DeepSeek 账号级配额（W7 压测时就是 API 护盾）；三参常驻键
+    global-rate: 10
+    global-interval: 1s

@@ -1,0 +1,12 @@
+event:thinking
+data:思考中…
+
+event:answer
+data:你好，这是 W6D1 本地桩模型的回答。
+
+event:answer
+data:（桩）
+
+event:done
+data:[DONE]
+

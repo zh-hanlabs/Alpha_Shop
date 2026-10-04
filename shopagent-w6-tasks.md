@@ -44,7 +44,7 @@
 - **全局桶** `rlimit:chat:global`：RateType.OVERALL，全实例共享，护 DeepSeek 账号级配额
 - **检查顺序：先用户桶后全局桶**——被用户桶拒绝的请求不消耗全局配额（单用户刷子不该挤占全局限额）；两层都 `tryAcquire()` 即时返回，不排队堆积（与 W3 拿锁失败即返回同哲学）
 - **挂点：ChatController 两端点入口前置闸**——/api/chat 返回 HTTP 429；/api/chat/stream 返回 SSE error 事件「当前咨询人数较多，请稍后再试～」+ done。被限流直接短路不进图（零记忆读、零 LLM 调用）。dev 端点（chaos/cache/obs/resilience）与 embedding 调用（DashScope 另一配额，知识检索已 fail-open 且量小）不挂限流
-- **参数（起点，D1 实测回填定稿）**：用户桶 rate=2/1s（正常聊天远低于配额，突刺演示 10 连发 2 过 8 拒）；全局桶 rate=10/1s（演示节奏 + W7 压测余量，压测时它就是 API 的护盾）
+- **参数【D1 实测定稿】**：用户桶 rate=2/1s（正常聊天远低于配额，突刺演示 10 连发 2 过 8 拒，冒烟 A/B 精确命中）；全局桶 rate=10/1s（演示节奏 + W7 压测余量，冒烟 C：12 新用户齐发 10 过 2 拒，压测时它就是 API 的护盾）
 - **桶键 TTL【D0 实测定稿】**：四参签名 = (type, rate, interval, ttl)，TTL 连内部键 `{key}:value`/`{key}:permits` 一起覆盖（冒烟 T4/T5）——**用户桶用四参 TTL=1h**（低频自动回收；到期=整桶重置，1s 窗口下无安全影响）；**全局桶三参常驻**（T3：三参无 TTL 永续，单键可接受）。Guard 调用序定稿：**每次请求先 trySetRate（幂等）再 tryAcquire**——T7 实证无配置桶 tryAcquire 直接抛 `RedisException("RateLimiter is not initialized")`，先 trySetRate 顺带覆盖 TTL 到期后的重建。运维坑：deleteByPattern/scan 模式须含前导 `*` 才能扫到内部键（花括号 hash-tag 开头）；三参桶（无 TTL）主键+内部键会永久堆积
 - **Redis 故障 fail-open**：限流器是保护器不是正确性来源——Redis 不可用时放行聊天（与缓存/知识同级），log warn 留痕
 - **已知局限（README 记录）**：userId 由调用方直传无登录态，换 userId 可绕过用户桶（真解 W8+ 登录态注入），全局桶兜底
@@ -104,10 +104,10 @@
 
 ### D1：双层限流
 
-- [ ] T1.1 `infra/resilience/RateLimitGuard`：用户桶+全局桶（先用户后全局）、参数 yml 化、Redis 故障 fail-open 放行、桶键 TTL
-- [ ] T1.2 ChatController 两端点前置闸：/api/chat → HTTP 429；/api/chat/stream → SSE error 话术 + done；被限流不进图（零 Redis 读零 LLM 调用）
-- [ ] T1.3 限流冒烟：PS5 Start-Job 并发突刺（沿用 W4 模式）——同用户 ×10 → 2 过 8 拒（参数实测定稿回填）；双用户并发互不挤占；全局桶独立验证（多用户合计打满）
-- [ ] T1.4 单测（mock Redisson）：用户桶拒绝 / 全局桶拒绝 / 双桶通过 / Redis 故障 fail-open / 检查顺序（用户桶拒绝时不消耗全局桶）
+- [x] T1.1 `infra/resilience/RateLimitGuard`：用户桶+全局桶（先用户后全局）、参数 yml 化（@Value `resilience.rate-limit.*`）、Redis 故障 fail-open 放行、桶键 TTL（用户桶四参 1h / 全局桶三参常驻，D0 定稿落地）
+- [x] T1.2 ChatController 两端点前置闸：/api/chat → HTTP 429；/api/chat/stream → SSE error 话术 + done（前端零改动）；被限流不进图（零记忆读零 LLM 调用）
+- [x] T1.3 限流冒烟四场景全 PASS（证据 docs/resilience/：burst.ps1 + smoke.txt + app-log-verdicts.txt + SSE raw ×3）：A 同用户 ×10 → 2 过 8 拒；B 双用户各 ×10 → 各 2 过 8 拒互不挤占；C 12 新用户 → 10 过 2 拒（全局桶独立）；D stream ×3 → answer×2 + error 话术×1。实测踩坑三条记录在脚本头：①per-request Start-Job 的进程唤醒抖动 >1s 窗口会撕开配额窗（改 job 内 HttpClient 齐射）；②PS5 无 BOM 读 UTF-8 脚本按 GBK，中文注释字节可破坏语法（补 BOM）；③Task.WaitAll 带 timeout 重载绑定失败需显式 cast Task[]。LLM 用本地 OpenAI 协议桩（w6d1-llm-stub.jsh，DEEPSEEK_API_KEY 不入仓不阻塞），限流语义与真 LLM 无关
+- [x] T1.4 单测（mock Redisson，6 用例）：用户桶拒绝短路且全局桶零消耗 / 全局桶拒绝 / 双桶通过 / Redis 故障 fail-open / 每次先 trySetRate 幂等重建 / 参数锁定（用户桶四参 TTL 版+全局桶三参版）
 
 ### D2：会话记忆 Redis 化
 
