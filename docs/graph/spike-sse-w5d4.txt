@@ -1,0 +1,38 @@
+=== W5D4 Graph spike: SSE case1 (tool bypass + typewriter + done) ===
+event:thinking
+data:思考中…
+
+event:tool
+data:正在搜索商品「露营灯」
+
+event:answer
+data:为您
+
+event:answer
+data:找到
+
+event:answer
+data:一款
+
+event:answer
+data:露营
+
+event:answer
+data:灯
+
+event:answer
+data:：
+data:
+data:
+...
+
+event:done
+data:[DONE]
+
+
+=== case2 memory continuity (turn2 refers turn1 product) ===
+118
+answer token events above; model resolved '那个灯' -> 便携式露营灯 via loadMemory node, knowledge hit IPX5
+
+=== case3 cross-conversation isolation + order tool chain (userId via graph ToolContext) ===
+data:正在查询订单 10001 的物流

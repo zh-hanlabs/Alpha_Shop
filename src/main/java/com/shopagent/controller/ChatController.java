@@ -1,13 +1,11 @@
 package com.shopagent.controller;
 
+import com.shopagent.agent.ShopAgentGraph;
 import com.shopagent.infra.idempotent.IdempotentKeys;
 import com.shopagent.tools.support.ToolContextKeys;
 import com.shopagent.tools.support.ToolEventListener;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.memory.ChatMemory;
-import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.http.MediaType;
 import org.springframework.http.codec.ServerSentEvent;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -19,6 +17,7 @@ import reactor.core.publisher.Sinks;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 @RestController
 public class ChatController {
@@ -28,21 +27,21 @@ public class ChatController {
     // W1 无鉴权：userId 由调用方直传（缺省即演示用户 u1001），W8+ 换登录态注入
     private static final String DEFAULT_USER_ID = "u1001";
 
-    private final ChatClient chatClient;
+    private final ShopAgentGraph shopAgentGraph;
 
-    public ChatController(ChatClient chatClient) {
-        this.chatClient = chatClient;
+    // W5D4 起接入层只做 SSE 事件组装，编排走 ShopAgentGraph（loadMemory→chat→persistMemory）
+    public ChatController(ShopAgentGraph shopAgentGraph) {
+        this.shopAgentGraph = shopAgentGraph;
     }
 
     public record ChatRequest(String conversationId, String message, String userId) {}
 
     @PostMapping("/api/chat")
     public String chat(@RequestBody ChatRequest request) {
-        return chatClient.prompt()
-                .user(request.message())
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, request.conversationId()))
-                .toolContext(buildToolContext(request, null))
-                .call().content();
+        return shopAgentGraph
+                .chatStream(resolveConversationId(request), request.message(), buildToolContext(request, null))
+                .collect(Collectors.joining())
+                .block();
     }
 
     @PostMapping(value = "/api/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -52,20 +51,15 @@ public class ChatController {
         Map<String, Object> toolContext = buildToolContext(request,
                 msg -> toolEvents.tryEmitNext(ServerSentEvent.builder(msg).event("tool").build()));
 
-        Flux<ServerSentEvent<String>> chatEvents = chatClient.prompt()
-                .user(request.message())
-                .advisors(a -> a.param(ChatMemory.CONVERSATION_ID, request.conversationId()))
-                .toolContext(toolContext)
-                .stream()
-                .chatResponse()
-                .map(ChatController::toAnswerEvent)
-                .filter(sse -> sse.data() != null && !sse.data().isEmpty())
-                // 工具事件先于其后的回答块（工具执行完才有最终回复），chat 流结束即可安全关闭事件通道
+        Flux<ServerSentEvent<String>> answerEvents = shopAgentGraph
+                .chatStream(resolveConversationId(request), request.message(), toolContext)
+                .map(text -> ServerSentEvent.builder(text).event("answer").build())
+                // 工具事件先于其后的回答块（工具执行完才有最终回复），answer 流结束即可安全关闭事件通道
                 .doFinally(signal -> toolEvents.tryEmitComplete());
 
         return Flux.concat(
                         Flux.just(ServerSentEvent.builder("思考中…").event("thinking").build()),
-                        Flux.merge(chatEvents, toolEvents.asFlux()),
+                        Flux.merge(answerEvents, toolEvents.asFlux()),
                         Flux.just(ServerSentEvent.builder("[DONE]").event("done").build()))
                 .onErrorResume(e -> {
                     log.error("chat stream failed, conversationId={}", request.conversationId(), e);
@@ -89,16 +83,13 @@ public class ChatController {
         return context;
     }
 
+    private String resolveConversationId(ChatRequest request) {
+        return Objects.requireNonNullElse(request.conversationId(), "");
+    }
+
     private String resolveUserId(ChatRequest request) {
         return (request.userId() == null || request.userId().isBlank())
                 ? DEFAULT_USER_ID
                 : request.userId().trim();
-    }
-
-    private static ServerSentEvent<String> toAnswerEvent(ChatResponse chunk) {
-        var result = chunk.getResult();
-        String text = (result == null || result.getOutput() == null) ? null : result.getOutput().getText();
-        return text == null ? ServerSentEvent.builder("").build()
-                : ServerSentEvent.builder(text).event("answer").build();
     }
 }

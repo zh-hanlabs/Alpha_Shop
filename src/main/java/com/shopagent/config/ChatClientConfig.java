@@ -10,7 +10,6 @@ import com.shopagent.tools.trade.CancelOrderTool;
 import com.shopagent.tools.trade.PlaceOrderTool;
 import com.shopagent.tools.trade.RefundOrderTool;
 import org.springframework.ai.chat.client.ChatClient;
-import org.springframework.ai.chat.client.advisor.MessageChatMemoryAdvisor;
 import org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor;
 import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.memory.MessageWindowChatMemory;
@@ -55,14 +54,15 @@ public class ChatClientConfig {
             - 与购物无关的话题，一句话说明职责范围并顺势引导回购物，不生硬拒绝、不展开闲聊。
             """;
 
-    // W1 过渡方案：默认 InMemoryChatMemoryRepository，重启即失忆；W6 换 Redis 实现（决策 D5）
+    // W1 过渡方案：默认 InMemoryChatMemoryRepository，重启即失忆；W6 换 Redis 实现（决策 D5）。
+    // W5D4 起记忆的读写由 ShopAgentGraph 的 loadMemory/persistMemory 节点管理（chatClient 不再挂记忆 Advisor）
     @Bean
     public ChatMemory chatMemory() {
         return MessageWindowChatMemory.builder().build();
     }
 
     @Bean
-    public ChatClient chatClient(ChatClient.Builder builder, ChatMemory chatMemory,
+    public ChatClient chatClient(ChatClient.Builder builder,
                                   OrderQueryTool orderQueryTool, LogisticsQueryTool logisticsQueryTool,
                                   ProductSearchTool productSearchTool, ProductDetailTool productDetailTool,
                                   RecentOrdersTool recentOrdersTool,
@@ -71,9 +71,7 @@ public class ChatClientConfig {
                                   CancelOrderTool cancelOrderTool) {
         return builder
                 .defaultSystem(SYSTEM_PROMPT)
-                .defaultAdvisors(
-                        MessageChatMemoryAdvisor.builder(chatMemory).build(),
-                        new SimpleLoggerAdvisor())
+                .defaultAdvisors(new SimpleLoggerAdvisor())
                 .defaultTools(orderQueryTool, logisticsQueryTool, productSearchTool, productDetailTool,
                         recentOrdersTool, knowledgeSearchTool, placeOrderTool, refundOrderTool, cancelOrderTool)
                 .build();
