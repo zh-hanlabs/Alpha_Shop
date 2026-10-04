@@ -1,0 +1,52 @@
+=== W7D1 T1.2 dev,mysql 双激活全链路冒烟 ===
+
+--- ① MySQL 数据中文零乱码抽查（data-mysql.sql 落库质量）---
+id	name	price	stock
+1	闪充移动电源 20000mAh	129.00	45
+2	编织快充数据线 1m	19.90	200
+3	户外徒步背包 40L	299.00	30
+order_no	tracks_json_ok	first_track_time
+10001	1	2026-10-03 11:17:56
+10002	1	2026-09-22 17:17:56
+10004	1	2026-09-30 03:17:56
+products
+8
+orders
+6
+
+--- ② 订单查询工具（dev 直连，中文响应）---
+{"code":0,"msg":"success","data":{"orderNo":"10001","status":"SHIPPED","totalAmount":148.90,"createdAt":"2026-10-02 15:17","items":[{"productName":"闪充移动电源 20000mAh","quantity":1,"unitPrice":129.00},{"productName":"编织快充数据线 1m","quantity":1,"unitPrice":19.90}]}}
+
+--- ③ 下单全闸序（TradeGuard→TradeService→MySQL 原子扣库存）---
+{"timestamp":"2026-10-04T09:18:42.940+00:00","status":400,"error":"Bad Request","path":"/api/dev/chaos/place"}
+
+--- ④ 退款状态机+还库存 ---
+{"userId":"u1001","orderNo":"10005","conversationId":"w7d1-smoke","message":"退款"}{"code":0,"msg":"success","data":{"orderNo":"10005","refundAmount":59.00,"status":"REFUNDED"}}
+
+--- ⑤ 审计表落 MySQL 验证 ---
+user_id	action	order_no	result_code	result_msg
+u1001	refund	10005	0	success
+
+--- ⑥ 两级缓存：冷（回源 MySQL）→ 热（L1 命中）---
+{"product":{"id":1,"name":"闪充移动电源 20000mAh","category":"充电配件","price":129.00,"description":"大容量充电宝，支持22.5W双向快充，双USB-C接口，自带数显电量，差
+{"product":{"id":1,"name":"闪充移动电源 20000mAh","category":"充电配件","price":129.00,"description":"大容量充电宝，支持22.5W双向快充，双USB-C接口，自带数显电量，差
+--- ⑦ 改价双删链（先更 MySQL 库再 L1+L2 双删）---
+{"productId":1,"oldPrice":129.00,"newPrice":119.00,"found":true}
+"price":119.00
+119.00
+--- ③ 重发：下单全闸序（UTF-8 文件体）---
+{"code":0,"msg":"success","data":{"orderNo":"20261004171900431353","productName":"钛合金保温杯 450ml","quantity":2,"totalAmount":178.00,"status":"PENDING_PAYMENT"}}
+--- MySQL 侧核验：订单+库存扣减+审计 ---
+--- MySQL 侧核验（修正查询）：订单+扣库存+审计 ---
+order_no	user_id	status	total_amount
+20261004171900431353	u1001	PENDING_PAYMENT	178.00
+10006	u1002	DELIVERED	599.00
+product_id	product_name	quantity	unit_price
+5	钛合金保温杯 450ml	2	89.00
+8	智能手表运动版	1	599.00
+id	stock
+5	118
+action	order_no	result_code	result_msg
+placeOrder	NULL	0	success
+refund	10005	0	success
+(stock 基线 120：下单 -2 后应为 118)

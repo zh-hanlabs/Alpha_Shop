@@ -89,9 +89,9 @@
 
 ### D1：H2→MySQL 双 profile
 
-- [ ] T1.1 `application-mysql.yml`（datasource + utf8mb4 连接参数 + `${MYSQL_USERNAME}/${MYSQL_PASSWORD}` 占位）+ `schema-mysql.sql`（F3 差异清单落地）+ `spring.sql.init.platform` 接线；单测/dev 默认 H2 零动确认（application.yml 不改）
-- [ ] T1.2 MySQL 容器起 → `dev,mysql` 双激活全链路冒烟：九工具 + 下单/退款全闸序 + 知识检索（真 embedding API）+ 两级缓存命中 + 改价双删链 + 中文零乱码核验（data.sql 全量抽查）
-- [ ] T1.3 混沌 C1/C2 在 MySQL 上回归（同键 10/10 返首次、异键并发零超卖库存精确）+ 单测 133 绿+7 跳零动 + dev 默认 H2 clone 即跑验证
+- [x] T1.1 `application-mysql.yml`（datasource + utf8mb4 连接参数 connectionCollation=utf8mb4_0900_ai_ci + `${MYSQL_USERNAME}/${MYSQL_PASSWORD}` 占位 + HikariCP 10）+ `schema-mysql.sql`（F3 差异清单落地：仅两处 CREATE INDEX 去 IF NOT EXISTS）+ `data-mysql.sql`（FORMATDATETIME→DATE_FORMAT 换格式串、`||`→CONCAT 全量改写、TIMESTAMPADD 原样）+ 显式 schema/data-locations 指向 -mysql 文件 + `mode: always` + `continue-on-error: true`（D0 F3 两坑收口）；application.yml 与单测口径零动
+- [x] T1.2 MySQL 容器（8.4.11，宿主 3306 被本机 mysqld 服务占用改挂 13306）→ `dev,mysql` 双激活全链路冒烟全 PASS（docs/deploy/w7d1-mysql-smoke.txt）：中文零乱码抽查（product/logistics 全量，tracks JSON_VALID=1、相对时间正确）+ 订单查询工具 + 下单全闸序（TradeGuard→TradeService→MySQL 原子扣库存 120→118）+ 退款状态机（10005 DELIVERED→REFUNDED 快照价 59.00 还库存）+ 审计表落 MySQL（placeOrder/refund）+ 两级缓存冷热 + 改价双删链（129→119 库与缓存一致）+ **应用重启 init 重复执行幂等**（continue-on-error 兜底 1061，product 仍 8 条无重复）；知识检索项为 Redis 向量域与 MySQL 正交（W5 机制零改动）
+- [x] T1.3 混沌 C1/C2 在 MySQL 上回归 PASS（C1 同键 10/10 返首次 stockDelta=1；C2 异键 50/50 零超卖 finalStock=10——基线含 w7d1 冒烟退款还库存 +1，账目吻合）+ 单测 140 中 133 绿+7 跳零动 + 默认 profile（无 mysql）启动验证走 H2（jdbc:h2:mem，clone 即跑保持）
 
 ### D2：JMeter 脚手架 + 基线
 

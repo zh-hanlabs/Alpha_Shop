@@ -1,0 +1,25 @@
+# W7D1 双 profile（ADR D8，shopagent-w7-tasks.md §2.1）：仅本 profile 覆盖连接层，
+# dev 默认 H2 零动（application.yml 不改）；压测/Compose 用 --spring.profiles.active=dev,mysql 双激活。
+# 语义红线：只动连接层，幂等键/锁键/缓存键/观测口径零漂移；C1/C2 在 MySQL 回归 PASS 才算切换成功。
+spring:
+  datasource:
+    # 凭据走环境变量占位（与密钥安全惯例一致，compose/.env 注入见 D4）；本地冒烟用镜像自动建库的演示账密兜底
+    url: jdbc:mysql://${MYSQL_HOST:localhost}:${MYSQL_PORT:3306}/${MYSQL_DATABASE:shopagent}?useUnicode=true&characterEncoding=UTF-8&connectionCollation=utf8mb4_0900_ai_ci&useSSL=false&allowPublicKeyRetrieval=true
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: ${MYSQL_USERNAME:shopagent}
+    password: ${MYSQL_PASSWORD:shopagent}
+    # HikariCP 起步默认（maximum-pool-size=10），压测若显示 DB 等待显著再显式调大并记录理由——不为数字好看预先调优（§2.1）
+    hikari:
+      maximum-pool-size: 10
+  sql:
+    init:
+      # D0 F3 两个隐藏坑收口（docs/deploy/w7d0-fact-checks.md F3）：
+      # ①sql.init.mode 默认 embedded——MySQL 数据源下根本不执行，必须 always；
+      # ②CREATE INDEX 在 MySQL 无幂等语法，重复启动 1061 → continue-on-error 兜底（重复运行仅此无害错误）
+      mode: always
+      continue-on-error: true
+      # 显式指向 -mysql 文件：防 platform 机制下 schema-mysql.sql 与 schema.sql 双跑
+      schema-locations: classpath:schema-mysql.sql
+      data-locations: classpath:data-mysql.sql
+      # Windows 默认 GBK 读 UTF-8 脚本会把中文 mock 数据读成乱码（W1 踩坑前科），显式声明
+      encoding: UTF-8
