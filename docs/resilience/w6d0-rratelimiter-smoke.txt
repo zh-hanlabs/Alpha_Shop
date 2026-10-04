@@ -1,0 +1,130 @@
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ----------------------< com.shopagent:shopagent >-----------------------
+[INFO] Building shopagent 0.0.1-SNAPSHOT
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.3.1:resources (default-resources) @ shopagent ---
+[INFO] Copying 1 resource from src\main\resources to target\classes
+[INFO] Copying 13 resources from src\main\resources to target\classes
+[INFO] 
+[INFO] --- compiler:3.14.1:compile (default-compile) @ shopagent ---
+[INFO] Nothing to compile - all classes are up to date.
+[INFO] 
+[INFO] --- resources:3.3.1:testResources (default-testResources) @ shopagent ---
+[INFO] skip non existing resourceDirectory D:\Code\shop_agent\src\test\resources
+[INFO] 
+[INFO] --- compiler:3.14.1:testCompile (default-testCompile) @ shopagent ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 17 source files with javac [debug parameters release 17] to target\test-classes
+[INFO] /D:/Code/shop_agent/src/test/java/com/shopagent/infra/idempotent/IdempotentExecutorTest.java: 某些输入文件使用或覆盖了已过时的 API。
+[INFO] /D:/Code/shop_agent/src/test/java/com/shopagent/infra/idempotent/IdempotentExecutorTest.java: 有关详细信息, 请使用 -Xlint:deprecation 重新编译。
+[INFO] /D:/Code/shop_agent/src/test/java/com/shopagent/infra/rag/KnowledgeIndexerTest.java: 某些输入文件使用了未经检查或不安全的操作。
+[INFO] /D:/Code/shop_agent/src/test/java/com/shopagent/infra/rag/KnowledgeIndexerTest.java: 有关详细信息, 请使用 -Xlint:unchecked 重新编译。
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ shopagent ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running com.shopagent.infra.resilience.RRateLimiterSemanticsSmokeTest
+10:08:27.601 [main] INFO org.redisson.Version -- Redisson 3.52.0
+10:08:27.965 [redisson-netty-1-4] INFO org.redisson.connection.ConnectionsHolder -- 1 connections initialized for 127.0.0.1/127.0.0.1:6379
+10:08:28.046 [redisson-netty-1-19] INFO org.redisson.connection.ConnectionsHolder -- 24 connections initialized for 127.0.0.1/127.0.0.1:6379
+10:08:28.078 [main] INFO org.redisson.Version -- Redisson 3.52.0
+10:08:28.109 [redisson-netty-5-4] INFO org.redisson.connection.ConnectionsHolder -- 1 connections initialized for 127.0.0.1/127.0.0.1:6379
+10:08:28.233 [redisson-netty-5-19] INFO org.redisson.connection.ConnectionsHolder -- 24 connections initialized for 127.0.0.1/127.0.0.1:6379
+[T1] trySetRate 首次=true 重复设=false → 5 连发通过=2（配额仍是 2 则只首次生效实证）
+[T1] setRate 覆盖为 5/1s → 5 连发通过=5
+[T5] 三参建桶 + 手动 expire(60s) 后各键 PTTL（含内部键）：
+    [T5] key=rlimit:smoke:w6d0:t1 PTTL=-1ms
+    [T5] key=rlimit:smoke:w6d0:t5 PTTL=59983ms
+    [T5] key={rlimit:smoke:w6d0:t1}:permits PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t1}:value PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t2}:permits PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t2}:value PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t3}:permits PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t3}:value PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t5}:permits PTTL=59976ms
+    [T5] key={rlimit:smoke:w6d0:t5}:value PTTL=59975ms
+    [T5] key={rlimit:smoke:w6d0:t6all}:permits PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t6all}:value PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t6per}:permits:3c70c03e-0056-4cf0-907a-ea101bbb6640 PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t6per}:permits:3f007464-3cc9-4518-960a-3f55445aff19 PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t6per}:permits:5fdfc04b-c1ba-45de-b028-592c17deabe2 PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t6per}:permits:766efa41-20f1-4388-afb4-5d27feeec819 PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t6per}:value:3c70c03e-0056-4cf0-907a-ea101bbb6640 PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t6per}:value:3f007464-3cc9-4518-960a-3f55445aff19 PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t6per}:value:5fdfc04b-c1ba-45de-b028-592c17deabe2 PTTL=-1ms
+    [T5] key={rlimit:smoke:w6d0:t6per}:value:766efa41-20f1-4388-afb4-5d27feeec819 PTTL=-1ms
+[T3] 三参 trySetRate 后主键 PTTL=-1ms（-1=无过期）
+    [T3] key=rlimit:smoke:w6d0:t1 PTTL=-1ms
+    [T3] key=rlimit:smoke:w6d0:t3 PTTL=-1ms
+    [T3] key=rlimit:smoke:w6d0:t5 PTTL=59941ms
+    [T3] key={rlimit:smoke:w6d0:t1}:permits PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t1}:value PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t2}:permits PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t2}:value PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t3}:permits PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t3}:value PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t5}:permits PTTL=59934ms
+    [T3] key={rlimit:smoke:w6d0:t5}:value PTTL=59933ms
+    [T3] key={rlimit:smoke:w6d0:t6all}:permits PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t6all}:value PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t6per}:permits:3c70c03e-0056-4cf0-907a-ea101bbb6640 PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t6per}:permits:3f007464-3cc9-4518-960a-3f55445aff19 PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t6per}:permits:5fdfc04b-c1ba-45de-b028-592c17deabe2 PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t6per}:permits:766efa41-20f1-4388-afb4-5d27feeec819 PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t6per}:value:3c70c03e-0056-4cf0-907a-ea101bbb6640 PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t6per}:value:3f007464-3cc9-4518-960a-3f55445aff19 PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t6per}:value:5fdfc04b-c1ba-45de-b028-592c17deabe2 PTTL=-1ms
+    [T3] key={rlimit:smoke:w6d0:t6per}:value:766efa41-20f1-4388-afb4-5d27feeec819 PTTL=-1ms
+[T6] PER_CLIENT 2/1s：A首设=true B重复设=false → A通过=2 B通过=2（各客户端独立桶则 2/2）
+[T6] OVERALL 2/1s 两客户端交替 6 次：合计通过=2（共享桶则 2）
+[T4] 四参 trySetRate(interval=1s, ttl=60s) 主键 PTTL=59999ms
+[T4] 5 连发通过=2（interval 语义校验，应为 2）
+    [T4] key=rlimit:smoke:w6d0:t1 PTTL=-1ms
+    [T4] key=rlimit:smoke:w6d0:t3 PTTL=-1ms
+    [T4] key=rlimit:smoke:w6d0:t4 PTTL=59986ms
+    [T4] key=rlimit:smoke:w6d0:t5 PTTL=59879ms
+    [T4] key=rlimit:smoke:w6d0:t6all PTTL=-1ms
+    [T4] key=rlimit:smoke:w6d0:t6per PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t1}:permits PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t1}:value PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t2}:permits PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t2}:value PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t3}:permits PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t3}:value PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t4}:permits PTTL=59978ms
+    [T4] key={rlimit:smoke:w6d0:t4}:value PTTL=59978ms
+    [T4] key={rlimit:smoke:w6d0:t5}:permits PTTL=59870ms
+    [T4] key={rlimit:smoke:w6d0:t5}:value PTTL=59869ms
+    [T4] key={rlimit:smoke:w6d0:t6all}:permits PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6all}:value PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:permits:3c70c03e-0056-4cf0-907a-ea101bbb6640 PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:permits:3f007464-3cc9-4518-960a-3f55445aff19 PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:permits:5fdfc04b-c1ba-45de-b028-592c17deabe2 PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:permits:766efa41-20f1-4388-afb4-5d27feeec819 PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:permits:f227575c-c1db-4420-9fb4-d253eebffa7a PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:permits:fcc6a28c-a913-4cac-9bd6-8778efe297b5 PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:value:3c70c03e-0056-4cf0-907a-ea101bbb6640 PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:value:3f007464-3cc9-4518-960a-3f55445aff19 PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:value:5fdfc04b-c1ba-45de-b028-592c17deabe2 PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:value:766efa41-20f1-4388-afb4-5d27feeec819 PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:value:f227575c-c1db-4420-9fb4-d253eebffa7a PTTL=-1ms
+    [T4] key={rlimit:smoke:w6d0:t6per}:value:fcc6a28c-a913-4cac-9bd6-8778efe297b5 PTTL=-1ms
+[T2] 2/1s 连发 5 次：通过=2 拒绝=3
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 2.088 s -- in com.shopagent.infra.resilience.RRateLimiterSemanticsSmokeTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  11.265 s
+[INFO] Finished at: 2026-10-04T10:08:30+08:00
+[INFO] ------------------------------------------------------------------------

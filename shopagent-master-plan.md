@@ -1,7 +1,7 @@
 # ShopAgent 项目主计划（Vibecoding 总纲）
 
 > 用途：本文件是项目的唯一事实来源（Single Source of Truth）。以后每次用 AI 辅助开发（vibecoding）时，把本文档 + 对应周的任务清单一起喂给 AI，即可冷启动。
-> 配套文件：`shopagent-w1w2-mvp-tasks.md`（W1-2 逐日任务）· `shopagent-w3w4-tasks.md`（W3-4 逐日任务 + 设计定稿）
+> 配套文件：`shopagent-w1w2-mvp-tasks.md`（W1-2 逐日任务）· `shopagent-w3w4-tasks.md`（W3-4 逐日任务 + 设计定稿）· `shopagent-w5-tasks.md`（W5 逐日任务 + 设计定稿）· `shopagent-w6-tasks.md`（W6 逐日任务 + 设计定稿）
 > 创建时间：2026-10-03 · 维护规则：每完成一周，更新对应周的「状态」列
 
 ---
@@ -81,7 +81,7 @@ shopagent/
 | W1-2 | MVP 跑通 | ReAct + 查询工具 + SSE + 聊天页 | 铺垫 | ✅ 2026-10-03 |
 | W3-4 | **交易安全（核心）** | 下单/退款工具 + 幂等 + Redisson 锁 | ⭐⭐⭐ | 🔄 W3 开工 2026-10-03 |
 | W5 | RAG + 缓存 | 商品知识库问答 + 热点多级缓存 | ⭐⭐ | ✅ 2026-10-04 |
-| W6 | 稳定性 | LLM 限流熔断降级 + Redis 会话记忆 | ⭐⭐ | ⬜ |
+| W6 | 稳定性 | LLM 限流熔断降级 + Redis 会话记忆 | ⭐⭐ | 🔄 清单就绪 2026-10-04 |
 | W7 | 数字 + 部署 | JMeter 压测 + Docker Compose + H2→MySQL | ⭐⭐ | ⬜ |
 | W8 | 打磨 | 简历措辞 + 三层追问准备 + commit 整理 | 收口 | ⬜ |
 
@@ -162,9 +162,9 @@ Agent 调交易工具的三个风险：
 
 | 能力 | 设计要点 |
 |---|---|
-| 限流 | Resilience4j RateLimiter 令牌桶，护 LLM API：全局 QPS + 单用户 QPS 双层 |
-| 熔断 | 失败率熔断，半开探测恢复；熔断期间**降级到规则回复**（"高峰期，简单问题我直接答"）而非报错 |
-| 会话记忆 Redis 化 | 自定义 ChatMemory 实现（Redis hash: `chat:memory:{conversationId}`，TTL 7 天），接入层变无状态 |
+| 限流 | Redisson RRateLimiter 分布式令牌桶，护 LLM API：全局 QPS + 单用户 QPS 双层（2026-10-04 修订：原 Resilience4j RateLimiter 为进程内实现，多实例下单用户桶配额 ×N 放大，与无状态扩容矛盾；裁决与设计见 shopagent-w6-tasks.md §2.1） |
+| 熔断 | Resilience4j CircuitBreaker 失败率熔断，半开探测恢复；熔断期间**降级到规则回复**（"高峰期，简单问题我直接答"）而非报错 |
+| 会话记忆 Redis 化 | 自定义 ChatMemoryRepository 实现（Redis hash: `chat:memory:{conversationId}`，TTL 7 天，MessageWindowChatMemory 窗口语义复用），接入层变无状态 |
 | 观测 | 决策日志结构化：每轮耗时/token 消耗/工具命中率，W7 压测的数据源 |
 
 **面试深挖点**：降级策略为什么是"规则回复"——用户体感 > 系统正确性的场景判断。

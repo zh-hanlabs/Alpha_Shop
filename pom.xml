@@ -73,6 +73,15 @@
             <groupId>com.github.ben-manes.caffeine</groupId>
             <artifactId>caffeine</artifactId>
         </dependency>
+        <!-- W6 依赖报备（shopagent-w6-tasks.md §三，对照主计划 §1 禁止清单全部合规）：
+             熔断件（主计划 §6 预批 Resilience4j）。D0 校验中央仓实存最新稳定 2.x=2.4.0。
+             仅引 resilience4j-circuitbreaker 核心件做 programmatic 封装，
+             不带 spring-cloud-starter-circuitbreaker-resilience4j（避免拖 Spring Cloud 全家桶，单体不引云配置） -->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-circuitbreaker</artifactId>
+            <version>2.4.0</version>
+        </dependency>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>
