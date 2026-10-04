@@ -1,0 +1,7 @@
+timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,sentBytes,grpThreads,allThreads,URL,Latency,IdleTime,Connect
+1791103146684,17,stub-sse-get,200,OK,smoke-threads 1-1,text,true,,474,123,1,1,http://127.0.0.1:18081/smoke,15,0,11
+1791103146703,2,stub-sse-get,200,OK,smoke-threads 1-1,text,true,,474,123,1,1,http://127.0.0.1:18081/smoke,2,0,0
+1791103146705,1,stub-sse-get,200,OK,smoke-threads 1-1,text,true,,474,123,1,1,http://127.0.0.1:18081/smoke,1,0,0
+1791103147122,2,stub-sse-get,200,OK,smoke-threads 1-2,text,true,,474,123,1,1,http://127.0.0.1:18081/smoke,2,0,0
+1791103147124,1,stub-sse-get,200,OK,smoke-threads 1-2,text,true,,474,123,1,1,http://127.0.0.1:18081/smoke,1,0,0
+1791103147126,1,stub-sse-get,200,OK,smoke-threads 1-2,text,true,,474,123,1,1,http://127.0.0.1:18081/smoke,1,0,0

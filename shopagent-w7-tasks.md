@@ -70,8 +70,8 @@
 
 | 依赖 | 版本 | 用途 | 合规依据 |
 |---|---|---|---|
-| `com.mysql:mysql-connector-j` | Boot 3.5.16 BOM 管理版（pom 不写死） | MySQL 8 JDBC 驱动 | 主计划 §1 预批「H2 → MySQL 8，W7 部署切 MySQL」；runtime scope |
-| JMeter + SSE 采样插件 | D0 探路定版（F1/F4） | 压测执行器（外部工具，不入 pom） | 主计划 §1「压测 JMeter（W7）」预批；插件属压测工具链非项目依赖 |
+| `com.mysql:mysql-connector-j` | **9.7.0**（Boot 3.5.16 BOM 管理版，pom 不写死，dependency:tree 已验） | MySQL 8 JDBC 驱动 | 主计划 §1 预批「H2 → MySQL 8，W7 部署切 MySQL」；runtime scope |
+| JMeter + SSE 采样插件 | **JMeter 5.6.3 定版（D0 探路）**；SSE 插件 `jmeter-sse-sampler` 2.0.1 探路结论=无 POST body 能力不符，走 PS5 兜底 | 压测执行器（外部工具，不入 pom） | 主计划 §1「压测 JMeter（W7）」预批；插件属压测工具链非项目依赖 |
 
 ---
 
@@ -80,12 +80,12 @@
 ### D0：设计定稿冻结 + 探路事实核查（半天-1 天）
 
 - [x] T0.1 四项裁决冻结（§2.1 双 profile / §2.2 桩为主+真 LLM 小样本+SSE 插件 / §2.3 Compose 依赖编排），本清单落盘 commit + 主计划同步（新增 §7 W7 章节、原 §7-§11 顺移 §8-§12、§3 状态行 🔄、配套文件行、ADR 补 D8、AGENTS.md 决策引用 §8→§9）
-- [ ] T0.2 F1 JMeter 下载安装（官方 dlcdn，失败走清华镜像）+ CLI 冒烟：`-n -t` 单 HTTP 请求 + HTML 报告 `-g` 生成
-- [ ] T0.3 F2 MySQL 镜像获取探路：`docker pull` 直试（8.4 LTS 优先）→ 失败走「官网直连下包 + 多阶段自建」playbook（W5D0 redis-stack 先例，介质从 dev.mysql.com）；同时盘点本地已有基座镜像（app 容器化加分项依据）
-- [ ] T0.4 F3 schema.sql / data.sql MySQL 方言逐行复核收口（已预核 CREATE INDEX IF NOT EXISTS 必改），产出 schema-mysql.sql 差异清单
-- [ ] T0.5 F4 SSE 插件获取探路（plugin manager 或直连下 jar 置 lib/ext）+ 对 POST + JSON body 的采样冒烟；失败兜底记录（PS5 抽样）
-- [ ] T0.6 F5 桩 LLM 并发承受力核查：jsh HttpServer 默认 executor 行为（单线程排队风险）→ 线程池化改造冒烟（50 并发不失真）
-- [ ] T0.7 依赖落地 mysql-connector-j（`dependency:tree` 校验）+ 探路结果回填本清单（§三版本定版）
+- [x] T0.2 F1 JMeter 下载安装（官方 dlcdn 直下成功，无需镜像）+ CLI 冒烟：5.6.3，6 samples Err 0.00%，JTL+HTML 报告生成（JDK21 可驱动；HTML 报告目录 3.1M gitignore，真跑批报告 D2/D3 再归档口径见 docs/deploy/w7d0-fact-checks.md F1）
+- [x] T0.3 F2 MySQL 镜像探路：**`docker pull mysql:8.4` 直接连成**（digest 6ea90827…，W5D0 断网前科不复现）→ 版本定版 8.4 LTS，compose 直用 image 无 build 段；本地无 JRE 基镜像（app 容器化加分项届时再探）
+- [x] T0.4 F3 方言逐行复核收口（docs/deploy/w7d0-fact-checks.md F3）：schema 5 表仅两处 `CREATE INDEX IF NOT EXISTS` 必改；data.sql 两处必改（FORMATDATETIME→DATE_FORMAT 换格式串、`||`→CONCAT——MySQL 默认无 PIPES_AS_CONCAT 是逻辑或）；TIMESTAMPADD 原样兼容；**两个 init 隐藏坑**——`sql.init.mode` 默认 embedded 对 MySQL 不执行（mysql profile 必须 always）+ CREATE INDEX 无幂等语法（continue-on-error:true 兜底 + 显式 schema/data-locations 指向 -mysql 文件防双跑）
+- [x] T0.5 F4 SSE 插件探路 → **走兜底**：候选 `io.github.cuneytcakir:jmeter-sse-sampler` 2.0.1（repo1 实存）解剖后仅 URL/DURATION/HEADERS 三属性、无 POST body——撑不起 POST+JSON；按 §2.2 预设：吞吐主口径走核心采样器压阻塞端点，SSE 组 PS5 抽样报事件时延/done 收尾率，口径声明降级不阻塞
+- [x] T0.6 F5 桩并发核查：既有桩（16 线程池）50 并发全 200，P50=1.5ms/P95=2.6ms/max=28ms——**无需线程池化改造**（T2.2 改判为维持现状；梯度到 100 并发时再复核，风险预案保留）
+- [x] T0.7 依赖落地：pom + mysql-connector-j（runtime，BOM 管理）→ dependency:tree 实测 **9.7.0** 入树 BUILD SUCCESS；dev 默认 H2 零动
 
 ### D1：H2→MySQL 双 profile
 
