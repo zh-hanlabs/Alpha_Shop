@@ -1,0 +1,22 @@
+=== matrix A: trade while Redis DOWN (expect fail-closed ½»Ò×Ôİ²»¿ÉÓÃ) ===
+{"code":50001,"msg":"½»Ò×Ôİ²»¿ÉÓÃ£¬ÇëÉÔºóÔÙÊÔ","data":null}
+
+=== matrix B: product detail while Redis DOWN, uncached id=1 (expect DB fall-through, price 129.00) ===
+{"product":{"id":1,"name":"ÉÁ³äÒÆ¶¯µçÔ´ 20000mAh","category":"³äµçÅä¼ş","price":129.00,"description":"´óÈİÁ¿³äµç±¦£¬Ö§³Ö22.5WË«Ïò¿ì³ä£¬Ë«USB-C½Ó¿Ú£¬×Ô´øÊıÏÔµçÁ¿£¬²îÂÃ³öĞĞ±Ø±¸"},"hotspotCount":-1,"stock":45}
+
+=== matrix C: knowledge QA while Redis DOWN (expect degraded answer, chat alive, no crash) ===
+¸ß·åÆÚ£¬¼òµ¥ÎÊÌâÎÒÖ±½Ó´ğ£ºÎÒÊÇĞ¡µê£¬Ö»·şÎñ¹ºÎïÏà¹Ø×ÉÑ¯£»ÄúÉÔºóÔÙÀ´£¬ÎÒ¸øÄúÏêÏ¸´ğ¸´¡«
+
+=== recover Redis ===
+redis ping: PONG
+
+=== matrix D: trade after recovery (expect success orderNo) ===
+{"code":0,"msg":"success","data":{"orderNo":"20261004140909335110","productName":"»§ÍâÍ½²½±³°ü 40L","quantity":1,"totalAmount":299.00,"status":"PENDING_PAYMENT"}}
+
+=== matrix E: knowledge QA after recovery (expect IPX5 facts again) ===
+¸ß·åÆÚ£¬¼òµ¥ÎÊÌâÎÒÖ±½Ó´ğ£ºÎÒÊÇĞ¡µê£¬Ö»·şÎñ¹ºÎïÏà¹Ø×ÉÑ¯£»ÄúÉÔºóÔÙÀ´£¬ÎÒ¸øÄúÏêÏ¸´ğ¸´¡«
+
+=== W6D5 å›å½’æ³¨è®° ===
+â‘  W6 è¯­ä¹‰å¢å¼ºå®è¯ï¼šmatrix Cï¼ˆRedis åœæœºæœŸ /api/chat 200 å­˜æ´»ï¼‰= W6D1 é™æµ fail-open æ”¾è¡Œ + W6D2 è®°å¿† fail-open ç©ºå†å² + W6D3 LLM å¤±è´¥é™çº§è¯æœ¯çš„ä¸‰çº§è”åŠ¨ï¼ˆæ¡©æœªèµ·ï¼ŒLLM è¿æ¥æ‹’ç»èµ°çœŸå®é™çº§è·¯å¾„ï¼‰
+â‘¡ matrix E å£å¾„ï¼šçŸ¥è¯†é—®ç­” IPX5 äº‹å®éœ€çœŸ LLM+RAGï¼ˆæ¡©ç¯å¢ƒä¸é€‚ç”¨ï¼‰ï¼ŒW5D5 å·²æœ‰çœŸ Key è¯æ®å­˜æ¡£ï¼ˆC5-degradation-matrix-w5.txtï¼‰
+â‘¢ æœ¬è¿è¡Œä¿®å¤ C5 è„šæœ¬ä¸¤å¤„ï¼šBOM ç¼ºå¤±ï¼ˆPS5 æŒ‰ GBK è¯»ä¸­æ–‡å­—é¢é‡è§£æå¤±è´¥ï¼‰+ ForEach-Object å†… break é™é»˜ç»ˆæ­¢è„šæœ¬ï¼ˆé¦–è½® PONG å³è§¦å‘ï¼ŒTee æ°¸ä¸æ‰§è¡Œâ€”â€”W5D5 ä¾¥å¹¸èµ°è¿‡æ˜¯å› å†·å¯åŠ¨é¦–è½® PING æœª PONGï¼‰

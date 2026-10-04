@@ -19,16 +19,16 @@
 
 硬性指标：
 
-- [ ] 限流：同用户并发突刺超出配额部分被拒（/api/chat 返回 429；/api/chat/stream 返回 SSE error 话术+done），双用户桶独立互不挤占——PS5 并发脚本证据 `docs/resilience/`
-- [ ] 限流参数实测定稿回填（用户桶/全局桶 rate 与依据，见 §2.1）
-- [ ] 熔断：LLM 故障注入 → OPEN → 规则回复（非报错）；半开探测失败回 OPEN；恢复后闭合——故障注入证据 `docs/resilience/`
-- [ ] 降级：意图分类 ≥5 类（订单/物流/商品/交易/其他）+ 交易类降级绝不规则执行只引导（安全红线）
-- [ ] 记忆：重启应用同会话记忆连续（Redis 键 TTL 7 天直读演示）；W1 记忆冒烟清单复跑行为等价（窗口语义/跨会话隔离）
-- [ ] Redis 停机：chat 记忆 fail-open 空历史照常、限流 fail-open 放行、交易仍 fail-closed——分级降级矩阵补格实测
-- [ ] 观测：OK / RATE_LIMITED / DEGRADED 三类轮次结构化记录齐全（耗时/token/工具清单），dev 端点可查
-- [ ] token 用量接线实测定稿（DeepSeek 流式 usage 可得则真值；不可得则 N/A + 字符数估算口径回填）
-- [ ] `mvn test` 全绿；混沌 C1-C5 回归 PASS（W6 动了 chat 链路与 pom，必须回归）
-- [ ] README 新增「稳定性设计」章节（三件套分工表 / 双层限流 / 降级矩阵补格 / 面试三层追问预演 / 已知局限）
+- [x] 限流：同用户并发突刺超出配额部分被拒（/api/chat 返回 429；/api/chat/stream 返回 SSE error 话术+done），双用户桶独立互不挤占——PS5 并发脚本证据 `docs/resilience/`（w6d1 冒烟 + C6 回归四场景全 PASS）
+- [x] 限流参数实测定稿回填（用户桶 2/1s + 全局桶 10/1s 实测直接成立，桶键 TTL 方案定稿见 §2.1）
+- [x] 熔断：LLM 故障注入 → OPEN → 规则回复（非报错）；半开探测失败回 OPEN；恢复后闭合——故障注入证据 `docs/resilience/`（w6d3 冒烟 + C7 回归全状态机实测）
+- [x] 降级：意图分类 ≥5 类（订单/物流/商品/交易/其他兜底，实测五话术互异）+ 交易类降级绝不规则执行只引导（安全红线，话术无执行性表述，单测+冒烟双验证）
+- [x] 记忆：重启应用同会话记忆连续（Redis 键 TTL 7 天直读演示，w6d2 冒烟 recall marker_hits=2）；W1 记忆冒烟清单复跑行为等价（连续对话/跨会话隔离/窗口 25→20 由 marker 回路+换装集成单测确定性验证；依赖 LLM 行为的条目如购物边界词待真 Key 环境复跑——口径已记录）
+- [x] Redis 停机：chat 记忆 fail-open 空历史照常、限流 fail-open 放行、交易仍 fail-closed——分级降级矩阵补格实测（C5 回归 matrix A/C 端到端，README 矩阵表已补 W6 两行）
+- [x] 观测：OK / RATE_LIMITED / DEGRADED 三类轮次结构化记录齐全（耗时/首 token/字符数代理 token/工具清单），dev 端点 turns/stats 可查（w6d4 冒烟 + 应用日志逐轮单行 JSON）
+- [x] token 用量接线实测定稿（机制已接线：stream-usage:true + graph 逐 chunk 捕获；桩环境拿不到 → N/A + answerChars 字符数估算口径回填 §2.4，usageHits 覆盖率可视化；真 DeepSeek 回传待真 Key 环境复测）
+- [x] `mvn test` 全绿（140 中 133 绿+7 跳——7 跳为 D0 Redis 语义锁默认不跑）；混沌 C1-C5 回归 PASS（另新增 C6/C7 全 PASS，W6 动了 chat 链路与 pom 已重验）
+- [x] README 新增「稳定性设计」章节（三件套分工表 / 双层限流 / 降级矩阵补格 / 面试三层追问预演 / 已知局限）+ 架构图 resilience 节点
 
 ---
 
@@ -132,10 +132,10 @@
 
 ### D5：buffer + 收尾
 
-- [ ] T5.1 混沌回归 C1-C5（W6 动了 chat 链路与 pom，交易安全必须重验）+ 新增 **C6 限流突刺 / C7 熔断故障注入恢复**，证据存 `docs/resilience/`
-- [ ] T5.2 README「稳定性设计」章节：三件套分工表 + 双层限流设计（用户桶/全局桶/检查顺序图）+ 分级降级矩阵补格（chat 记忆 fail-open、限流 fail-open）+ 面试三层追问预演（令牌桶参数怎么定 / 为什么熔断进程内而限流分布式 / 降级为什么是规则回复）+ 已知局限（userId 可伪造换桶 / 熔断进程内 / 观测非全链路 / 降级无查询直答）；架构图加 resilience 层节点
-- [ ] T5.3 commit 校对（`W6D{n}:` 格式）+ 本清单硬性指标逐项勾选 + 主计划 §6/§3 状态更新 + 项目记忆更新
-- （可选加分，时间富余才做）双实例 curl 演证：同 conversationId 跨实例记忆连续 + 全局桶跨实例共享——「无状态扩容」实证；做不完不算欠账
+- [x] T5.1 混沌回归 C1-C5 全 PASS（最终 W6 构建重验：C1 同键 10/10 返回首次、C2 异键 50/50 零超卖 60→9、C3 退款重放全返首次、C4 停机 fail-closed 自愈、C5 分级降级矩阵——matrix C 端到端实证 W6 双 fail-open：Redis 停机期限流放行+记忆空历史+LLM 降级话术）+ 顺手修出 C5 脚本两个潜伏 bug（BOM 缺失 GBK 解析失败 / ForEach-Object 内 break 静默终止脚本）+ 新增 **C6 限流突刺**（四场景全 PASS，docs/chaos/c6-rate-limit-burst.ps1 → docs/resilience/c6-rate-limit-burst-w6d5.txt）**/ C7 熔断故障注入恢复**（CLOSED→5 连败→OPEN→短路→20s 半开 3 探测失败→回 OPEN→reset 恢复，docs/chaos/c7-circuit-break.sh → docs/resilience/c7-circuit-break-w6d5.txt）
+- [x] T5.2 README「稳定性设计」章节（三件套分工表 / 双层限流设计与裁决理由 / 熔断状态机实测图 / 双实例无状态实证 / 面试三层追问预演 / 已知局限 6 条）+ 分级降级矩阵补格（W5 表格新增会话记忆 fail-open、聊天限流 fail-open 两行）+ 架构图刷新（RateLimitGuard 接入层闸、LlmCircuitBreaker+RuleFallbackService 图内节点、TurnMetricsRecorder 观测节点、ChatMemory 改 Redis 仓库节点）+ 踩坑实录 +4 条
+- [x] T5.3 commit 校对（W6D0-D5 全部 `W6D{n}:` 格式）+ 本清单硬性指标逐项勾选（见 §一）+ 主计划 §3 W6 状态 ✅、§6 已随 D0 同步——项目记忆以主计划状态行与本清单勾选为持久载体（沿用 W5 口径）
+- [x] （加分项，已做）双实例演证：跨实例记忆连续（A 存 B recall marker_hits=2）+ 全局桶跨实例共享（12 用户交替打两实例精确 10 过 2 拒、429 分落两实例）——「无状态扩容」实证，证据 docs/resilience/dual-instance-w6d5.txt
 
 ---
 

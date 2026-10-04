@@ -1,4 +1,4 @@
-# W5D5 degradation matrix: with Redis DOWN -> trade fail-closed / knowledge degrade (chat alive) /
+﻿# W5D5 degradation matrix: with Redis DOWN -> trade fail-closed / knowledge degrade (chat alive) /
 # cache fall through to DB; after Redis RECOVERS -> all self-heal. Evidence -> C5-degradation-matrix-w5.txt
 param([string]$BaseUrl = 'http://localhost:8080')
 
@@ -36,7 +36,13 @@ $out += Post-Json "$BaseUrl/api/chat" (@{ conversationId = 'matrix-1'; message =
 $out += ''
 $out += '=== recover Redis ==='
 docker start shopagent-redis | Out-Null
-$null = 1..20 | ForEach-Object { $ok = docker exec shopagent-redis redis-cli PING 2>$null; if ("$ok" -match 'PONG') { break }; Start-Sleep -Seconds 2 }
+# W6D5 回归修复：原写法 ForEach-Object 内 break 在无外层循环时会静默终止整个脚本
+# （首轮 PING 即 PONG 时必触发，Tee 永不执行）——for 循环 + 标志位是安全等价
+$pinged = $false
+for ($i = 0; $i -lt 20 -and -not $pinged; $i++) {
+    $ok = docker exec shopagent-redis redis-cli PING 2>$null
+    if ("$ok" -match 'PONG') { $pinged = $true } else { Start-Sleep -Seconds 2 }
+}
 $out += "redis ping: $(docker exec shopagent-redis redis-cli PING)"
 $out += ''
 $out += '=== matrix D: trade after recovery (expect success orderNo) ==='

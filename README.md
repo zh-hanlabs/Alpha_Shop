@@ -11,9 +11,11 @@ flowchart LR
     end
     subgraph GATE["接入层"]
         API["POST /api/chat[/stream]<br/>conversationId + userId + 指令摘要注入<br/>SSE 事件组装（thinking/answer/tool/done）"]
+        RL["RateLimitGuard（W6D1）<br/>用户桶 2/1s + 全局桶 10/1s<br/>先用户后全局 · fail-open"]
     end
     subgraph GRAPH["Agent 编排层 · ShopAgentGraph（W5D4 起）"]
         G["START → loadMemory → chat → persistMemory → END<br/>记忆读写显式节点化 · token 流节点内旁路"]
+        CB["LlmCircuitBreaker（W6D3）<br/>滑窗10 · 失败率50% · min5 · OPEN 20s · 半开3<br/>OPEN 短路 → RuleFallbackService<br/>5 类意图话术 · 交易只引导"]
     end
     subgraph TOOLS["工具层 · userId 走 ToolContext 注入"]
         QT["查询工具<br/>queryOrder · queryLogistics<br/>searchProduct · productDetail · recentOrders<br/>searchKnowledge（RAG）"]
@@ -33,9 +35,12 @@ flowchart LR
     VEC[("Redis Stack · RediSearch<br/>shopagent-knowledge 向量索引<br/>DashScope text-embedding-v4 1024 维")]
     L1[("Caffeine L1<br/>商品展示字段 500/60s")]
 
-    UI -->|"fetch SSE"| API --> G
+    UI -->|"fetch SSE"| API --> RL -->|"放行"| G
+    API -.->|"RATE_LIMITED 轮记账"| OBS
     G <-->|"ReAct 决策（九工具）"| QT
-    G <-->|"记忆读写节点"| MEM[ChatMemory<br/>InMemory · W6 换 Redis]
+    G <-->|"chat 节点整段 LLM 调用"| CB
+    G <-->|"记忆读写节点"| MEM[("Redis chat:memory:{会话ID}<br/>RedisChatMemoryRepository（W6D2）<br/>hash+序号 · 两态 JSON · TTL 7天写时刷新<br/>读写 fail-open")]
+    G -.->|"图内轮收尾记账"| OBS[("TurnMetricsRecorder（W6D4）<br/>轮级 outcome/耗时/首token/token/工具清单<br/>单行 JSON 日志 + 环形缓冲 100")]
     QT --> QS --> H2
     QT --> KS --> VEC
     QS -.->|"展示字段缓存 · stock 永不缓存"| L1
@@ -96,7 +101,7 @@ curl -X POST -H "Content-Type: application/json" `
 
 ## 已实现功能
 
-- **多轮记忆 + 会话隔离**：MessageWindowChatMemory（InMemory，W6 换 Redis），conversationId 路由
+- **多轮记忆 + 会话隔离**：MessageWindowChatMemory 窗口语义（默认 20 条），conversationId 路由；W6D2 起挂 `RedisChatMemoryRepository`（hash+序号+两态 JSON，TTL 7 天写时刷新），重启/跨实例记忆连续（对照 W1 重启失忆）
 - **4 个查询工具，模型自主决策调用**：订单详情 / 物流轨迹 / 商品搜索 / 最近订单
 - **下单工具（W3D1-2）**：placeOrder 含库存原子扣减防超卖、价格快照、Prompt 二次确认（先复述商品/数量/总价，用户同意才执行）
 - **幂等执行器（W3D3）**：`infra/idempotent/` 显式插闸，幂等键 = sha256(用户+动作+参数+会话+指令摘要)；同键重放返回首次结果而非报错（防 LLM 重试死循环）；Redis 故障时交易 fail-closed
@@ -107,6 +112,7 @@ curl -X POST -H "Content-Type: application/json" `
 - **知识库 RAG（W5D1-2）**：商品域语料 40 条 → DashScope text-embedding-v4（1024 维）→ Redis Stack FLAT 向量索引；`KnowledgeIndexer` 指纹幂等启动（不变跳过/变更全量重建/分批≤10/fail-open）；`searchKnowledge` 召回 top5→阈值 0.5 截断→bigram 标题加权重排 top3；LLM 冒烟 10/10（事实全准/链式调用/无关问题零注入，证据 `docs/rag/`）
 - **两级缓存（W5D3）**：`TwoLevelCache` L1 Caffeine 500/60s + L2 Redisson 30min，商品展示字段缓存而**库存永不缓存**（`ProductDetailVO` 编译期无 stock 字段）；Cache Aside 先更库再双删实测回源新值；热点穿透计数打标；降级矩阵实测 Redis 停机→交易 fail-closed/缓存透传/知识降级聊天照常（证据 `docs/cache/`、`docs/chaos/C5`）
 - **Graph 编排升级（W5D4）**：ChatClient 直连 → `ShopAgentGraph` 状态图（START→loadMemory→chat→persistMemory→END），记忆读写显式节点化、token 流节点内旁路（spike 实证图 state 克隆边界，旁路对象走 invocation 持有表）；SSE 五类事件与前端零改动，断连语义改进（图照跑记忆照落，重放由幂等闸收束）
+- **稳定性三件套（W6）**：双层分布式限流 + LLM 熔断 + 规则回复降级 + 会话记忆 Redis 化 + 结构化轮级观测，详见「稳定性设计」章节；混沌 C1-C7 回归全 PASS + 双实例无状态演证（证据 `docs/resilience/`）
 - **工具调用可视化**：前端实时显示「🔍 正在查询订单 10001…」，回答打字机逐字输出
 - **身份注入防越权**：userId 走 ToolContext，模型无法伪造调用方身份；工具层订单归属校验
 
@@ -244,6 +250,8 @@ Redis 停机时按业务代价分级——**交易错一笔是真金白银，知
 | 查询 | 纯 H2 不受影响 | 天然隔离 | — |
 | 商品详情 | L1 仍有本地缓存；未命中→透传走库（`hotspotCount` 读数降级 -1） | **fail-open** | L2 随重连回填 |
 | 知识检索 | error code「知识库暂不可用」，模型诚实告知并引导，**聊天主链路照常** | **fail-open** | 应用重启触发指纹重建（运行时索引丢失自愈为已知局限） |
+| 会话记忆（W6D2） | 读失败→**空历史照常聊**；写失败→吞掉仅 warn（降级粒度=单轮） | **fail-open**（记忆是体验不是正确性） | 重连即恢复，活跃会话 TTL 写时续期 |
+| 聊天限流（W6D1） | Redisson 抛错→**放行聊天**（C5 matrix C 端到端实证） | **fail-open**（限流器是保护器不是正确性来源） | 重连即恢复，桶键 trySetRate 幂等重建 |
 
 ### 面试三层追问预演
 
@@ -259,6 +267,61 @@ Redis 停机时按业务代价分级——**交易错一笔是真金白银，知
 2. **热点打标只有计数**：无动态 TTL/淘汰调度（砍单线：打标是手段，调度是策略），数字与调度策略留给 W7 JMeter。
 3. **知识库只覆盖商品域** 40 条：不做通用爬取（砍单线），召回质量靠语料 fixture 迭代。
 4. **重排是规则不是模型**：bigram 匹配对同义改写无感知（「防水吗」vs「能碰水吗」靠向量分兜底），规模化后 reranker 是第一升级项。
+
+## 稳定性设计（W6 实录）
+
+护的是 LLM API 这条最贵最脆的外呼链路——**限流挡量、熔断止损、降级保体感、观测留证据**。全程不破坏 W3 交易安全与 W5 缓存/RAG 语义（混沌 C1-C7 回归全 PASS）。
+
+### 三件套分工
+
+| 能力 | 组件 | 挂点 | 要点 |
+|---|---|---|---|
+| 限流 | `RateLimitGuard`（Redisson RRateLimiter 分布式令牌桶） | ChatController 两端点**入口前置闸** | 用户桶 2/1s + 全局桶 10/1s，**先用户后全局**（被用户桶拒绝不消耗全局配额）；被拒 `/api/chat`→429、`/api/chat/stream`→SSE error 话术+done；不进图零记忆读零 LLM 调用 |
+| 熔断 | `LlmCircuitBreaker`（Resilience4j 2.4 programmatic，name=llmChat 全局单实例） | ShopAgentGraph chat 节点包整段 LLM 调用 | 次数滑窗 10 / 失败率 50% / min5 / OPEN 20s / 半开 3 探测；OPEN 抛 `CallNotPermittedException` 短路，token 流照常走 sink 旁路 |
+| 降级 | `RuleFallbackService`（纯话术） | 熔断 OPEN 与 LLM 失败两条路的兜底 | 关键词意图 5 类（交易/订单/物流/商品/兜底）各配话术；**交易类最先判定且只引导绝不执行**——交易的二次确认是 Prompt 行为链路，没有 LLM 就没有确认链路；降级回复 4字/40ms 分片走 answer 流（打字机体感不变），persistMemory 照跑 |
+| 观测 | `TurnMetricsRecorder` + `TurnCollector` | 限流轮 controller 记、图内轮 chatStream 收尾记（跨层记账） | 轮级 outcome（OK/RATE_LIMITED/DEGRADED/ERROR）/耗时/首 token 延迟/usage token/工具调用清单；单行 JSON 日志（W7 JMeter 取数源）+ 环形缓冲 100 + dev 端点 turns/stats |
+
+### 双层限流（为什么是 Redisson 而不是 Resilience4j RateLimiter）
+
+主计划 §6 原方案「Resilience4j RateLimiter」经事实核查推翻：它是**进程内**实现，多实例下单用户桶配额 ×N 放大，与 W6「接入层无状态扩容」主题自相矛盾。改用 Redisson RRateLimiter（Redis 侧令牌桶，D0 冒烟实证五条语义后定稿）：
+
+- **用户桶** `rlimit:chat:user:{userId}`：每用户 2/1s（正常聊天远低于配额，突刺演示 10 连发 2 过 8 拒）；四参 `trySetRate` 带 TTL=1h——低频用户桶键自动回收（TTL 连内部键 `{key}:value/{key}:permits` 一起覆盖，D0 实测）
+- **全局桶** `rlimit:chat:global`：全实例共享 10/1s，护 DeepSeek 账号级配额；三参常驻键
+- **PER_CLIENT 误读实证**：RateType.PER_CLIENT 按 Redisson 客户端实例分桶（内部键带 clientId 后缀），不是按终端用户——所以用户桶必须用 OVERALL + userId 键名
+- **调用序定稿**：每次请求先 `trySetRate`（幂等）再 `tryAcquire`——无配置桶 tryAcquire 直接抛 `RedisException`（D0 实证），先 trySetRate 顺带覆盖 TTL 到期重建
+- **fail-open**：限流器是保护器不是正确性来源，Redis 不可用放行聊天（C5 matrix C 端到端实证）
+- 实测踩坑：per-request Start-Job 并发突刺的进程唤醒抖动 >1s 会撕开配额窗，冒烟改 job 内 HttpClient 齐射（证据 `docs/resilience/w6d1-rate-limit-smoke.txt`）
+
+### 熔断状态机（C7 回归实测，`docs/resilience/c7-circuit-break-w6d5.txt`）
+
+```
+CLOSED --5 连败(5/5=100%≥50%, min5 满)--> OPEN --短路(瞬时, notPermitted 递增)-->
+  --20s(waitDurationInOpenState)--> HALF_OPEN --放行 3 探测--> 全成 → CLOSED
+                                                    └→ 3/3 失败 → 回 OPEN 继续降级
+```
+
+失败判定 = LLM 调用抛异常（连接拒绝/超时/5xx/流中断）；工具失败不算（W1 铁律：工具内消化不外抛，到不了这层）；慢调用阈值不开（保守起步只算失败率）。注意降级轮响应 ~0.5s 里约 440ms 是打字机分片体感延迟，熔断短路本身瞬时。
+
+### 无状态扩容实证（双实例，`docs/resilience/dual-instance-w6d5.txt`）
+
+同 jar 双实例（:8081/:8082）共连同一 Redis：**① 跨实例记忆连续**——A 实例存 marker，B 实例 recall 命中（marker_hits=2），对照 W1 单机内存重启失忆；**② 全局桶跨实例共享**——12 个新用户交替打两实例，精确 10×200 + 2×429，且 429 分落两个实例。这是「限流必须分布式、记忆必须外置」两条设计决策的直接实证。
+
+### 面试三层追问预演
+
+| 追问 | 应答要点 |
+|---|---|
+| 令牌桶参数怎么定？ | 用户桶 2/1s 按正常聊天节奏定（一秒一句已是连续追问），突刺超出即拒；全局桶 10/1s 按 DeepSeek 账号配额余量+压测余量定（W7 压测时它就是 API 护盾）；TTL=1h 覆盖低频回收且到期重置无安全影响（1s 窗口秒级自愈）；都经冒烟实测回填（10 连发 2 过 8 拒 / 12 用户 10 过 2 拒），不拍脑袋 |
+| 为什么熔断进程内而限流分布式？ | 熔断是**实例自保**——各实例独立探测独立降级，半开探测流量有限（3 次/实例）可控，进程内反而简单；限流是**共享资源语义**（账号配额/用户公平性），必须全实例一致，状态放 Redis 换一致性。同一个「保护 LLM」问题，按语义选位置——双实例演证是这条答案的实证 |
+| 降级为什么是规则回复而不是报错/查询直答？ | 用户体感 > 系统正确性：高峰期给一句有人味的话术好过一屏异常堆栈；不做查询直答是已裁定的边界——工具直答没有模型组织语言与安全审查，规则回复的话术是人工审过的安全文本，且**交易类只引导绝不执行**（没有 LLM 就没有二次确认链路，宁可少办不可错办） |
+
+### 已知局限与改进方向
+
+1. **userId 由调用方直传无登录态**：换 userId 可绕过用户桶（真解 = W8+ 登录态注入），全局桶兜底防打满。
+2. **熔断器进程内**：多实例各自探测各自降级（设计取舍），极端情况下实例间降级状态短暂不一致。
+3. **观测非全链路 trace**：轮级指标为止，不上 Micrometer/Prometheus/Grafana（砍单线）；跨段（限流轮/图内轮）靠跨层记账拼齐。
+4. **降级无查询直答**：纯话术不做工具兜底（已裁定），查询类问题降级期只能引导稍后再试。
+5. **token usage 口径**：`stream-usage` 已开、graph 逐 chunk 捕获，桩环境拿不到 → `promptTokens/completionTokens=null`（N/A）+ `answerChars` 字符数代理（`usageHits` 覆盖率可视化）；真 DeepSeek 是否回传待真 Key 环境复测。
+6. **降级话术意图分类是关键词规则**：不做 NLU，复杂表述可能落兜底（安全红线类交易关键词覆盖优先，宁可错杀）。
 
 ## 模型切换
 
@@ -279,7 +342,11 @@ W5D0 起聊天与 embedding 分路由（`spring.ai.model.*` 路由键，双 star
 7. **Redis Stack 镜像获取死局四连坑（W5D0 实录）**：①Docker Hub 官方镜像与十余加速站全不可达（TLS 超时/403/缺层）→ 官方镜像路径死；②改用官方 apt 源 `packages.redis.io` 自建，但 **BuildKit 构建期网络与 run 容器不同路径**（run 容器可达、build 三连败；另两个前置坑：底座无 ca-certificates 致 https 源静默失败、TUN 代理 fake-ip 劫持容器 DNS 需 `--add-host` 钉真实 IP）；③宿主机直连可达后一查包索引：**bookworm 源里根本没有 redis-stack-server 包**——就算 build 网络通了 apt 也会报「无法定位软件包」（包只在 bullseye/jammy 源）；④bullseye 版 deb 链 OpenSSL 1.1（bookworm 底座无 1.1），**选 jammy 版**——与官方 Docker 镜像底座（ubuntu22.04/libssl3）同构，bookworm glibc 2.36 向下兼容。**终极解法：宿主机下载 deb（SHA256 校验）→ 多阶段构建（unpack 阶段 `dpkg -x`，`COPY --from` Linux→Linux 保权限）→ 全程零网络，BuildKit 问题不复存在**。方法论：构建期网络死局优先「把网络操作移出构建」而非「修构建网络」。
 8. **Graph state 不能装「活对象」（W5D4 spike）**：SAA Graph 在节点间用序列化器**克隆 state**（JacksonStateSerializer.cloneObject），把 Sinks.Many/带 lambda 的 ToolContext 放进 state 直接 `JsonMappingException`。解法：不可序列化的请求态走 invocation 持有表（UUID 键 + ConcurrentHashMap），state 只承载可序列化值；历史消息用 `SpringAIStateSerializer` 保 Spring AI 类型。教训：图的 state 是「跨节点业务事实」，不是「请求上下文容器」。
 9. **Redis Stack 重启丢内存态（W5D5）**：`docker stop/start` 后向量索引、文档、指纹键全部蒸发（Redis Stack 默认不落 RDB）——知识检索持续「暂不可用」直到应用重启触发 Indexer 指纹重建。自愈边界按设计定稿收敛在启动期；生产口径 = 向量索引开 AOF/独立故障域（与幂等/锁/缓存分离，§2.2 面试点）。
+10. **PS5 读 BOM-less UTF-8 脚本按 GBK（W6D1/D5）**：脚本里的中文字面量/注释按 GBK 解码后可能出现破坏语法的字节——轻则运行时爆「无法识别 cmdlet」，重则**整个脚本静默失败（exit 0、零输出）**。修复：`.ps1` 一律补 UTF-8 BOM。同类坑：Git Bash 内联 curl 传中文变 GBK → Spring JSON 400，冒烟统一走 `--data-binary @utf8文件`。
+11. **`ForEach-Object` 里的 `break` 会静默终止整个脚本（W6D5）**：C5 的 PING 等待循环用 `if (PONG) { break }`，首轮 PING 就 PONG 时脚本在 Tee 前无声死掉（exit 0、证据文件不落盘）——`break` 在无外层循环的 scriptblock 里是「终止脚本」语义。修复：for 循环 + 标志位。排查之难在于零输出零报错，靠逐行插桩定位。
+12. **RRateLimiter 桶键结构（W6D0/D1）**：主键+内部键 `{主键}:value/{主键}:permits`（花括号 hash-tag 开头），`--scan`/`deleteByPattern` 模式必须带前导 `*` 才能扫到内部键，否则孤儿堆积；PER_CLIENT 是按 Redisson 客户端实例分桶不是按终端用户（内部键带 clientId 后缀）。
+13. **Resilience4j 2.4 API 与旧资料不一致（W6D3）**：Builder 是 `slidingWindowType()`+`slidingWindowSize()` 两方法（无 `slidingWindow(type, n)`）；状态迁移方法名 `transitionToForcedOpenState()`；`getNumberOfNotPermittedCalls()` 返回 long——照旧版博客写必编译错。
 
 ## 当前进度
 
-**W5 收官**：RAG + 多级缓存 + Graph 编排全链路完成——Redis Stack 向量库（40 条商品域语料，指纹幂等启动）+ `searchKnowledge` 召回/重排/注入（LLM 冒烟 10/10）+ 两级缓存（库存永不缓存，改价双删回源实测）+ `ShopAgentGraph` 三节点编排（spike 通过才迁，token 流旁路）；分级降级矩阵实测（交易 fail-closed / 知识缓存 fail-open）；混沌 C1-C4 回归全 PASS + 单测 94/94；README「RAG 与多级缓存设计」章节 + 架构图（graph/knowledge/vector/cache 节点）刷新到位。W4 交易安全三件套（幂等/锁/审计）+ W1-2 MVP 前置完成。接下来 W6 稳定性三件套：LLM 限流熔断降级 + 会话记忆 Redis 化 + 结构化观测。路线图见 `shopagent-master-plan.md`，W5 任务清单见 `shopagent-w5-tasks.md`。
+**W6 收官**：稳定性三件套全链路完成——双层分布式限流（Redisson RRateLimiter 用户桶+全局桶，D0 语义冒烟定稿）+ 会话记忆 Redis 化（`RedisChatMemoryRepository`，重启/跨实例记忆连续）+ LLM 熔断（Resilience4j，5 连败 OPEN→半开探测状态机实测）+ 规则回复降级（5 类意图、交易只引导、SSE 打字机体感不变）+ 结构化观测（轮级 outcome/耗时/token/工具清单，单行 JSON + 环形缓冲 100）；混沌 C1-C7 回归全 PASS（C6 限流突刺/C7 熔断注入为 W6 新增，C5 脚本顺手修出两个潜伏 bug）+ 双实例无状态演证（跨实例记忆连续 + 全局桶跨实例共享 10 过 2 拒）；单测 140/133 绿。README「稳定性设计」章节 + 架构图（限流闸/熔断降级/观测/Redis 记忆节点）刷新到位。W5（RAG+缓存+Graph）、W4（幂等/锁/审计）、W1-2（MVP）此前完成。接下来 W7 压测与部署：JMeter 报告（限流前后对比/缓存命中提升）+ Docker Compose 一键起 + H2→MySQL。路线图见 `shopagent-master-plan.md`，W6 任务清单见 `shopagent-w6-tasks.md`。

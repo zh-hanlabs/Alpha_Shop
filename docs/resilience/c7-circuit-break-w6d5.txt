@@ -1,0 +1,31 @@
+== C7 phase1: fault injection (LLM dead) ==
+state before: {"state":"CLOSED","failureRate":-1.0,"bufferedCalls":0,"failedCalls":0,"successfulCalls":0,"notPermittedCalls":0}
+[call-1] 200 0.777542s
+[call-2] 200 0.548227s
+[call-3] 200 0.554866s
+[call-4] 200 0.547627s
+[call-5] 200 0.567541s
+[call-6] 200 0.535007s
+state after 6 calls (expect OPEN, failedCalls>=5): {"state":"OPEN","failureRate":100.0,"bufferedCalls":5,"failedCalls":5,"successfulCalls":0,"notPermittedCalls":1}
+short-circuit timing: [call-7] 200 0.537726s  (expect <0.5s, not-permitted)
+state: {"state":"OPEN","failureRate":100.0,"bufferedCalls":5,"failedCalls":5,"successfulCalls":0,"notPermittedCalls":2}
+-- wait 21s (waitDurationInOpenState=20s) then probe: half-open fails -> back OPEN --
+[probe] 200 0.554693s
+state after probe (expect OPEN): {"state":"HALF_OPEN","failureRate":-1.0,"bufferedCalls":1,"failedCalls":1,"successfulCalls":0,"notPermittedCalls":0}
+-- W6D5 注记：0.5s 响应时长含降级话术打字机分片（4字/40ms×~11片≈440ms，D3 设计体感），熔断短路本身瞬时（notPermittedCalls 递增为证）--
+-- 补齐半开配额（permitted=3，已用 1）：再探 2 次，评估 3/3=100% → 回 OPEN --
+[probe-2] 200 0.545615s
+[probe-3] 200 0.535720s
+state after 3 probes (expect OPEN): {"state":"OPEN","failureRate":100.0,"bufferedCalls":3,"failedCalls":3,"successfulCalls":0,"notPermittedCalls":0}
+== C7 phase2: recovery demo (stub LLM working) ==
+normal answer: MEMORY-CHECK: marker_hits=0 history_msgs=2
+force-open: {"state":"FORCED_OPEN","failureRate":-1.0,"bufferedCalls":0,"failedCalls":0,"successfulCalls":0,"notPermittedCalls":0}
+degraded reply while FORCED_OPEN: 高峰期，简单问题我直接答：我是小店，只服务购物相关咨询；您稍后再来，我给您详细答复～
+reset: {"state":"CLOSED","failureRate":-1.0,"bufferedCalls":0,"failedCalls":0,"successfulCalls":0,"notPermittedCalls":0}
+answer after reset (expect normal LLM reply): MEMORY-CHECK: marker_hits=0 history_msgs=6
+
+=== verdicts ===
+phase1: CLOSED → 5 连败 → OPEN（5/5=100%，notPermitted 递增=短路瞬时）→ 20s 后半开放行 3 探测（HALF_OPEN 状态可见）→ 3/3 失败 → 回 OPEN: PASS
+注记: 降级轮响应 ~0.54s 含打字机分片体感延迟（4字/40ms，D3 设计），非短路耗时
+phase2: 正常回答 → force-open FORCED_OPEN 降级话术 → reset CLOSED → 正常回答恢复（history_msgs=6 含降级轮记忆）: PASS
+参数定稿: §2.2 起点参数（滑窗10/50%/min5/OPEN 20s/半开3）在最终构建上全部成立

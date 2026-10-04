@@ -1,0 +1,24 @@
+=== W6D5 加分项：双实例无状态扩容演证 ===
+实例A :8081 / 实例B :8082（同 jar、同 Redis、同桩 LLM）
+
+--- ① 跨实例记忆连续：A 存 marker，B recall ---
+[A store ] MEMORY-CHECK: marker_hits=1 history_msgs=2
+[B recall] MEMORY-CHECK: marker_hits=2 history_msgs=4  <- marker_hits=2 = A 存的记忆 B 能读到（接入层无状态实证）
+
+--- ② 全局桶跨实例共享：12 新用户交替打 A/B（各 6 个），全局桶 10/1s 共享 ---
+[guser-2 -> :8081] HTTP=200
+[guser-3 -> :8082] HTTP=200
+[guser-1 -> :8082] HTTP=200
+[guser-5 -> :8082] HTTP=200
+[guser-4 -> :8081] HTTP=200
+[guser-6 -> :8081] HTTP=200
+[guser-7 -> :8082] HTTP=200
+[guser-8 -> :8081] HTTP=200
+[guser-11 -> :8082] HTTP=429
+[guser-9 -> :8082] HTTP=200
+[guser-10 -> :8081] HTTP=200
+[guser-12 -> :8081] HTTP=429
+
+=== verdicts ===
+① 跨实例记忆连续: A(:8081) 存 marker-dual4321 → B(:8082) recall marker_hits=2 : PASS——记忆在 Redis，接入层无状态，任意实例可续会话（对照 W1 单机内存重启失忆）
+② 全局桶跨实例共享: 12 新用户交替打 A/B → 精确 10×200 + 2×429，且 429 分落两实例（guser-11@B、guser-12@A）: PASS——全局桶状态在 Redis，配额全实例一致，进程内限流器做不到
