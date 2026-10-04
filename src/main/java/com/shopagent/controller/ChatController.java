@@ -2,6 +2,7 @@ package com.shopagent.controller;
 
 import com.shopagent.agent.ShopAgentGraph;
 import com.shopagent.infra.idempotent.IdempotentKeys;
+import com.shopagent.infra.obs.TurnMetricsRecorder;
 import com.shopagent.infra.resilience.RateLimitGuard;
 import com.shopagent.tools.support.ToolContextKeys;
 import com.shopagent.tools.support.ToolEventListener;
@@ -35,12 +36,15 @@ public class ChatController {
 
     private final ShopAgentGraph shopAgentGraph;
     private final RateLimitGuard rateLimitGuard;
+    private final TurnMetricsRecorder turnMetricsRecorder;
 
     // W5D4 起接入层只做 SSE 事件组装，编排走 ShopAgentGraph（loadMemory→chat→persistMemory）；
     // W6D1 起入口前置 RateLimitGuard：被限流直接短路，不进图（零记忆读、零 LLM 调用）
-    public ChatController(ShopAgentGraph shopAgentGraph, RateLimitGuard rateLimitGuard) {
+    public ChatController(ShopAgentGraph shopAgentGraph, RateLimitGuard rateLimitGuard,
+                          TurnMetricsRecorder turnMetricsRecorder) {
         this.shopAgentGraph = shopAgentGraph;
         this.rateLimitGuard = rateLimitGuard;
+        this.turnMetricsRecorder = turnMetricsRecorder;
     }
 
     public record ChatRequest(String conversationId, String message, String userId) {}
@@ -50,7 +54,8 @@ public class ChatController {
         String userId = resolveUserId(request);
         RateLimitGuard.Verdict verdict = rateLimitGuard.tryAcquire(userId);
         if (verdict != RateLimitGuard.Verdict.ALLOWED) {
-            // D4 观测在此记 RATE_LIMITED 轮（限流轮不进图，controller 层记账）
+            // W6D4 跨层记账：限流轮在 controller 记（图内轮在 chatStream 收尾记）
+            turnMetricsRecorder.rateLimited(resolveConversationId(request), userId);
             return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS).body(RATE_LIMITED_MSG);
         }
         return ResponseEntity.ok(shopAgentGraph
@@ -64,7 +69,7 @@ public class ChatController {
         String userId = resolveUserId(request);
         RateLimitGuard.Verdict verdict = rateLimitGuard.tryAcquire(userId);
         if (verdict != RateLimitGuard.Verdict.ALLOWED) {
-            // D4 观测在此记 RATE_LIMITED 轮；SSE error+done 前端零改动（事件契约同 onErrorResume）
+            turnMetricsRecorder.rateLimited(resolveConversationId(request), userId);
             log.info("chat stream rate limited: userId={} verdict={}", userId, verdict);
             return Flux.just(
                     ServerSentEvent.builder(RATE_LIMITED_MSG).event("error").build(),

@@ -1,7 +1,9 @@
 package com.shopagent.agent;
 
+import com.shopagent.infra.obs.TurnMetricsRecorder;
 import com.shopagent.infra.resilience.LlmCircuitBreaker;
 import com.shopagent.infra.resilience.RuleFallbackService;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.chat.client.ChatClient;
 import org.springframework.ai.chat.memory.ChatMemory;
@@ -32,7 +34,8 @@ class ShopAgentGraphFallbackTest {
     void breakerOPEN_短路不调LLM_规则回复走token流_记忆照落() throws Exception {
         LlmCircuitBreaker breaker = new LlmCircuitBreaker(2, 50, 2, Duration.ofSeconds(20), 2);
         breaker.forceOpen();
-        ShopAgentGraph graph = new ShopAgentGraph(chatClient, chatMemory, breaker, new RuleFallbackService());
+        ShopAgentGraph graph = new ShopAgentGraph(chatClient, chatMemory, breaker, new RuleFallbackService(),
+                new TurnMetricsRecorder(new ObjectMapper()));
         when(chatMemory.get(anyString())).thenReturn(List.of());
 
         List<String> tokens = graph.chatStream("c1", "帮我退款", java.util.Map.of())

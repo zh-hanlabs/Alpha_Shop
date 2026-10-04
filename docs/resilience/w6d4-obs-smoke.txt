@@ -1,0 +1,45 @@
+=== W6D4 T4.3 观测冒烟（桩 LLM + dev profile）===
+
+--- ① OK 轮（正常流式回答）---
+MEMORY-CHECK: marker_hits=0 history_msgs=2
+HTTP=200
+
+--- ② 工具轮（stream 端点触发 searchProduct 工具调用，SSE 应见 tool 事件 + answer）---
+event:thinking
+data:思考中…
+
+event:tool
+data:正在搜索商品「灯」
+
+event:answer
+data:TOOL-DONE: tool result merged into context.
+
+event:done
+data:[DONE]
+
+
+--- ③ RATE_LIMITED 轮（同用户突刺 4 发，后 2 发 429）---
+burst-1: HTTP=200
+burst-2: HTTP=200
+burst-3: HTTP=429
+burst-4: HTTP=429
+
+--- ④ DEGRADED 轮（force-open 后 stream 提问）---
+高峰期，简单问题我直接答：我是小店，只服务购物相关咨询；您稍后再来，我给您详细答复～
+HTTP=200
+(breaker reset)
+
+--- ⑤ 轮级明细 /api/dev/obs/turns?limit=8 ---
+[{"ts":"2026-10-04T04:59:42.028453300Z","conversationId":"w6d4-ok","userId":"obs-1","outcome":"OK","totalMs":287,"llmMs":234,"firstTokenMs":254,"promptTokens":null,"completionTokens":null,"answerChars":42,"toolCalls":{}},{"ts":"2026-10-04T04:59:42.196598600Z","conversationId":"w6d4-tool","userId":"obs-2","outcome":"OK","totalMs":117,"llmMs":100,"firstTokenMs":102,"promptTokens":null,"completionTokens":null,"answerChars":43,"toolCalls":{"ProductSearchTool":1}},{"ts":"2026-10-04T04:59:42.288841900Z","conversationId":"w6d4-rl","userId":"burst-user","outcome":"OK","totalMs":21,"llmMs":7,"firstTokenMs":9,"promptTokens":null,"completionTokens":null,"answerChars":42,"toolCalls":{}},{"ts":"2026-10-04T04:59:42.371200500Z","conversationId":"w6d4-rl","userId":"burst-user","outcome":"OK","totalMs":24,"llmMs":6,"firstTokenMs":10,"promptTokens":null,"completionTokens":null,"answerChars":42,"toolCalls":{}},{"ts":"2026-10-04T04:59:42.410524700Z","conversationId":"w6d4-rl","userId":"burst-user","outcome":"RATE_LIMITED","totalMs":0,"llmMs":0,"firstTokenMs":null,"promptTokens":null,"completionTokens":null,"answerChars":0,"toolCalls":{}},{"ts":"2026-10-04T04:59:42.480301600Z","conversationId":"w6d4-rl","userId":"burst-user","outcome":"RATE_LIMITED","totalMs":0,"llmMs":0,"firstTokenMs":null,"promptTokens":null,"completionTokens":null,"answerChars":0,"toolCalls":{}},{"ts":"2026-10-04T04:59:43.093903300Z","conversationId":"w6d4-deg","userId":"obs-3","outcome":"DEGRADED","totalMs":533,"llmMs":513,"firstTokenMs":9,"promptTokens":null,"completionTokens":null,"answerChars":42,"toolCalls":{}}]
+
+--- ⑥ 汇总 /api/dev/obs/stats ---
+{"turns":7,"byOutcome":{"OK":4,"RATE_LIMITED":2,"DEGRADED":1},"avgTotalMs":140,"totalPromptTokens":0,"totalCompletionTokens":0,"usageHits":0,"toolCallDistribution":{"ProductSearchTool":1}}
+
+=== verdicts ===
+① OK 轮: outcome=OK totalMs=287 llmMs=234 firstTokenMs=254 answerChars=42: PASS
+② 工具轮端到端: tool_call 桩→真实 searchProduct 执行→toolCalls={ProductSearchTool:1} + SSE tool 事件照发: PASS
+③ RATE_LIMITED: controller 记账 totalMs=0 无 token 无工具: PASS
+④ DEGRADED: force-open 后 outcome=DEGRADED: PASS
+⑤ stats: turns=7 byOutcome{OK:4,RATE_LIMITED:2,DEGRADED:1} toolCallDistribution{ProductSearchTool:1} usageHits=0: PASS
+⑥ 单行 JSON 日志: 应用日志逐轮输出含 outcome/ts/totalMs/toolCalls 全字段: PASS
+⑦ usage 口径回填: 桩模型不回 usage → usageHits=0、promptTokens/completionTokens=null（N/A）+ answerChars 字符数代理；机制已接线（yml stream-usage:true + graph captureUsage 逐 chunk 捕获），真 DeepSeek 是否回传待 D5 真 Key 环境复测（§2.4 预案: 不可得则 N/A 口径，面试讲清口径比硬凑数字好）

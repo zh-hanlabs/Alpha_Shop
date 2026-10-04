@@ -7,8 +7,12 @@ import com.alibaba.cloud.ai.graph.StateGraph;
 import com.alibaba.cloud.ai.graph.action.AsyncNodeAction;
 import com.alibaba.cloud.ai.graph.state.strategy.ReplaceStrategy;
 import com.alibaba.cloud.ai.graph.serializer.std.SpringAIStateSerializer;
+import com.shopagent.infra.obs.TurnCollector;
+import com.shopagent.infra.obs.TurnMetricsRecorder;
 import com.shopagent.infra.resilience.LlmCircuitBreaker;
 import com.shopagent.infra.resilience.RuleFallbackService;
+import com.shopagent.tools.support.ToolContextKeys;
+import com.shopagent.tools.support.ToolEventListener;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -17,6 +21,7 @@ import org.springframework.ai.chat.memory.ChatMemory;
 import org.springframework.ai.chat.messages.AssistantMessage;
 import org.springframework.ai.chat.messages.Message;
 import org.springframework.ai.chat.messages.UserMessage;
+import org.springframework.ai.chat.metadata.Usage;
 import org.springframework.ai.chat.model.ChatResponse;
 import org.springframework.stereotype.Component;
 import reactor.core.publisher.Flux;
@@ -57,22 +62,26 @@ public class ShopAgentGraph {
     private final ChatMemory chatMemory;
     private final LlmCircuitBreaker llmCircuitBreaker;
     private final RuleFallbackService ruleFallbackService;
+    private final TurnMetricsRecorder turnMetricsRecorder;
     private final CompiledGraph compiledGraph;
     // 请求态旁路通道：sink/toolContext 不可序列化，只能随 invocation id 在持有表中传递（见类注释）
     private final Map<String, InvocationContext> invocations = new ConcurrentHashMap<>();
 
-    private record InvocationContext(Sinks.Many<String> tokens, Map<String, Object> toolContext) {}
+    private record InvocationContext(Sinks.Many<String> tokens, Map<String, Object> toolContext,
+                                     TurnCollector collector) {}
 
     // 降级回复的流式体感：按小片推进模拟 token 流（§2.2：answer 流照发，前端打字机零改动）
     private static final int FALLBACK_CHUNK = 4;
     private static final long FALLBACK_CHUNK_DELAY_MS = 40;
 
     public ShopAgentGraph(ChatClient chatClient, ChatMemory chatMemory,
-                          LlmCircuitBreaker llmCircuitBreaker, RuleFallbackService ruleFallbackService) throws Exception {
+                          LlmCircuitBreaker llmCircuitBreaker, RuleFallbackService ruleFallbackService,
+                          TurnMetricsRecorder turnMetricsRecorder) throws Exception {
         this.chatClient = chatClient;
         this.chatMemory = chatMemory;
         this.llmCircuitBreaker = llmCircuitBreaker;
         this.ruleFallbackService = ruleFallbackService;
+        this.turnMetricsRecorder = turnMetricsRecorder;
         StateGraph graph = new StateGraph(() -> {
             Map<String, KeyStrategy> keys = new HashMap<>();
             keys.put(KEY_CONVERSATION_ID, new ReplaceStrategy());
@@ -100,7 +109,9 @@ public class ShopAgentGraph {
     public Flux<String> chatStream(String conversationId, String message, Map<String, Object> toolContext) {
         String invocationId = UUID.randomUUID().toString();
         Sinks.Many<String> tokens = Sinks.many().unicast().onBackpressureBuffer();
-        invocations.put(invocationId, new InvocationContext(tokens, toolContext));
+        TurnCollector collector = new TurnCollector();
+        wrapToolListener(toolContext, collector);
+        invocations.put(invocationId, new InvocationContext(tokens, toolContext, collector));
         Flux.defer(() -> {
             try {
                 compiledGraph.stream(Map.of(
@@ -110,13 +121,28 @@ public class ShopAgentGraph {
                         .blockLast();
                 tokens.tryEmitComplete();
             } catch (Exception e) {
+                collector.markError();
                 tokens.tryEmitError(e);
             } finally {
                 invocations.remove(invocationId);
+                // W6D4：图内轮在收尾记账（限流轮在 controller 记——观测是横切，跨层记账）
+                turnMetricsRecorder.record(collector.materialize(conversationId,
+                        String.valueOf(toolContext.getOrDefault(ToolContextKeys.USER_ID, ""))));
             }
             return Flux.empty();
         }).subscribeOn(Schedulers.boundedElastic()).subscribe();
         return tokens.asFlux();
+    }
+
+    /** 工具计数：包装既有 SSE 监听器（tools/ 零改动），计数后照常转发，前端事件零变化 */
+    private void wrapToolListener(Map<String, Object> toolContext, TurnCollector collector) {
+        Object existing = toolContext.get(ToolContextKeys.TOOL_EVENT_LISTENER);
+        if (existing instanceof ToolEventListener listener) {
+            toolContext.put(ToolContextKeys.TOOL_EVENT_LISTENER, (ToolEventListener) message -> {
+                collector.toolEvent(message);
+                listener.onToolEvent(message);
+            });
+        }
     }
 
     private Map<String, Object> loadMemory(OverAllState state) {
@@ -140,6 +166,7 @@ public class ShopAgentGraph {
             throw new IllegalStateException("invocation context missing (broken graph invocation)");
         }
         String answer;
+        long llmStart = System.nanoTime();
         try {
             answer = llmCircuitBreaker.execute(() -> streamAnswer(message, history, invocation));
         } catch (CallNotPermittedException e) {
@@ -150,6 +177,9 @@ public class ShopAgentGraph {
             log.warn("llm call failed, rule fallback for this turn: conversationId={}",
                     state.value(KEY_CONVERSATION_ID).orElse(""), e);
             answer = streamFallback(message, invocation);
+        } finally {
+            // llmMs 含失败轮（降级前的等待/尝试时长）：OPEN 短路≈0，一眼区分短路与真实尝试
+            invocation.collector().llmFinished((System.nanoTime() - llmStart) / 1_000_000);
         }
         return Map.of(KEY_ANSWER, answer);
     }
@@ -162,24 +192,40 @@ public class ShopAgentGraph {
                 .toolContext(invocation.toolContext())
                 .stream()
                 .chatResponse()
-                .map(ShopAgentGraph::textOf)
-                .filter(text -> text != null && !text.isEmpty())
-                // 节点内阻塞收集：persistMemory 必须等 answer 聚合完才有资格执行（图边序即因果序）
-                .doOnNext(token -> {
-                    answer.append(token);
-                    invocation.tokens().tryEmitNext(token);
+                // 流式 usage（stream-usage 开启）挂在最后一个 chunk 的 metadata 上，逐 chunk 捕获即可
+                .doOnNext(response -> {
+                    captureUsage(invocation.collector(), response);
+                    String text = textOf(response);
+                    if (text != null && !text.isEmpty()) {
+                        answer.append(text);
+                        invocation.collector().onToken();
+                        invocation.tokens().tryEmitNext(text);
+                    }
                 })
                 .blockLast();
+        invocation.collector().answer(answer.toString());
         return answer.toString();
+    }
+
+    private void captureUsage(TurnCollector collector, ChatResponse response) {
+        if (response.getMetadata() == null) {
+            return;
+        }
+        Usage usage = response.getMetadata().getUsage();
+        if (usage != null) {
+            collector.usage(usage.getPromptTokens(), usage.getCompletionTokens());
+        }
     }
 
     /** 降级回复按意图分类取话术，小片推进模拟 token 流，打字机体感与正常轮一致 */
     private String streamFallback(String message, InvocationContext invocation) {
+        invocation.collector().markDegraded();
         String reply = ruleFallbackService.reply(message);
         char[] chars = reply.toCharArray();
         for (int i = 0; i < chars.length; i += FALLBACK_CHUNK) {
             int end = Math.min(i + FALLBACK_CHUNK, chars.length);
             invocation.tokens().tryEmitNext(new String(chars, i, end - i));
+            invocation.collector().onToken();
             try {
                 Thread.sleep(FALLBACK_CHUNK_DELAY_MS);
             } catch (InterruptedException e) {
@@ -187,6 +233,7 @@ public class ShopAgentGraph {
                 break;
             }
         }
+        invocation.collector().answer(reply);
         return reply;
     }
 

@@ -40,6 +40,9 @@ spring:
       chat:
         options:
           model: deepseek-chat
+          # W6D4 观测：流式回传 usage（OpenAI 协议 stream_options.include_usage）。
+          # DeepSeek 侧是否真返回由 D4/D5 实测；拿不到走 N/A + answerChars 字符数估算口径（§2.4）
+          stream-usage: true
     dashscope:
       # embedding 专用 Key（DeepSeek 无 embedding 端点，向量能力必须第二提供方，§2.1）
       api-key: ${AI_DASHSCOPE_API_KEY:dummy}

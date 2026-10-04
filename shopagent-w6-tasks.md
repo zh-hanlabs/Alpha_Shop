@@ -125,10 +125,10 @@
 
 ### D4：观测
 
-- [ ] T4.1 `infra/obs/TurnMetricsRecorder`：轮级 outcome/耗时/首 token 延迟/token 用量/工具清单（包装 ToolEventListener 计数）；单行 JSON 日志 + 环形缓冲 100
-- [ ] T4.2 `DevObsController`：GET /api/dev/obs/turns + /api/dev/obs/stats
-- [ ] T4.3 冒烟：OK / RATE_LIMITED / DEGRADED 三类轮次记录齐全；DeepSeek 流式 usage 实测（拿不到 → N/A + 估算口径回填 §2.4）
-- [ ] T4.4 单测：指标采集 / 工具计数 / outcome 分类 / 环形缓冲
+- [x] T4.1 `infra/obs/TurnMetricsRecorder` + `TurnMetrics`/`TurnCollector`：轮级 ts/conversationId/userId/**outcome（OK/RATE_LIMITED/DEGRADED/ERROR）**/totalMs/llmMs/首 token 延迟/promptTokens/completionTokens/answerChars/工具调用清单与次数；限流轮在 controller 记（rateLimited 快捷记账）、图内轮在 chatStream 收尾记（collector 进 invocation 持有表）——跨层记账；工具计数 = graph 内包装既有 ToolEventListener（计数后照常转发，tools/ 零改动），9 个工具入口话术前缀映射表（顺序敏感：物流查询含「正在查询订单」前缀须先判），未知事件计 tool:unknown 不丢数；落点 = 单行 JSON 日志（W7 JMeter 取数唯一事实源）+ 环形缓冲 100
+- [x] T4.2 `DevObsController`（@Profile("dev")）：GET /api/dev/obs/turns（?limit 取尾部 N 条）+ /api/dev/obs/stats（轮数/byOutcome 分布/avgTotalMs/token 合计+usageHits 覆盖率/工具调用分布）
+- [x] T4.3 冒烟全 PASS（docs/resilience/w6d4-obs-smoke.txt，tool-call 桩 w6d4-llm-stub-toolcall.jsh）：OK 轮（totalMs=287/firstTokenMs=254）、工具轮端到端（桩发 OpenAI tool_call→真实 searchProduct 执行→toolCalls={ProductSearchTool:1}+SSE tool 事件照发）、RATE_LIMITED（controller 记账 totalMs=0）、DEGRADED（force-open）；stats 汇总 byOutcome{OK:4,RATE_LIMITED:2,DEGRADED:1}/工具分布/usageHits=0；**usage 口径回填 §2.4**：桩不回 usage → promptTokens/completionTokens=null（N/A）+ answerChars 代理，机制已接线（yml stream-usage:true + graph 逐 chunk captureUsage），真 DeepSeek 回传与否待 D5 真 Key 复测
+- [x] T4.4 单测 12 例（全量 140 中 133 绿+7 跳）：TurnCollector（首 token 单值/工具计数合并/物流与订单前缀重叠顺序敏感/未知不丢数/outcome 三态/usage N/A 与可得/字符数落位 7）+ Recorder（入环快照/环形 100 淘汰最旧/限流轮字段/stats 汇总/单行 JSON 无换行 5）
 
 ### D5：buffer + 收尾
 
