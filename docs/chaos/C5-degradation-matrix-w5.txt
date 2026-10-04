@@ -1,0 +1,18 @@
+=== redis STOPPED at 08:41:17 ===
+{"code":50001,"msg":"交易暂不可用，请稍后再试","data":null}
+--- B: detail id=1 (uncached) while DOWN, expect DB fall-through ---
+{"product":{"id":1,"name":"闪充移动电源 20000mAh","category":"充电配件","price":129.00,"description":"大容量充电宝，支持22.5W双向快充，双USB-C接口，自带数显电量，差旅出行必备"},"hotspotCount":-1,"stock":45}
+--- C: knowledge QA while DOWN, expect degraded-but-alive ---
+抱歉，知识库暂时不可用，我这边没法确认露营灯的防水等级 😔
+
+您可以稍后再问我一次，或者换个问法试试。如果您是想找防水的露营灯，我也可以帮您搜一下相关商品，需要吗？
+--- D: redis recovered (PONG), trade again, expect success ---
+{"code":0,"msg":"success","data":{"orderNo":"20261004084235857321","productName":"户外徒步背包 40L","quantity":1,"totalAmount":299.00,"status":"PENDING_PAYMENT"}}
+--- E: knowledge QA after recovery, expect IPX5 facts ---
+我帮您查一下露营灯的防水情况～抱歉，知识库现在还是暂时不可用，我暂时没法查到露营灯的防水等级 🙏
+
+建议您稍后再试，或联系人工客服确认。如果您想找防水的露营灯，我可以帮您搜一下商品看看，需要的话告诉我～
+
+--- E: knowledge QA after recovery (app restart -> indexer rebuild -> IPX5 restored) ---
+重启后索引重建（Redis Stack docker stop/start 丢内存态，fingerprint 键同失）；再问「露营灯防水吗」恢复 IPX5 事实回答。
+结论：交易/缓存/查询自愈=秒级重连；知识库自愈=应用重启触发指纹重建（运行时索引丢失自愈列为已知局限，改进方向=运行时重建触发器）。

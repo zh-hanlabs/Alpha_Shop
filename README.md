@@ -10,14 +10,13 @@ flowchart LR
         UI[index.html<br/>单页聊天 · SSE 打字机]
     end
     subgraph GATE["接入层"]
-        API["POST /api/chat[/stream]<br/>conversationId + userId + 指令摘要注入"]
+        API["POST /api/chat[/stream]<br/>conversationId + userId + 指令摘要注入<br/>SSE 事件组装（thinking/answer/tool/done）"]
     end
-    subgraph AGENT["Agent 层"]
-        CC[ChatClient<br/>System Prompt + 记忆 Advisor]
-        MEM[ChatMemory<br/>InMemory · W6 换 Redis]
+    subgraph GRAPH["Agent 编排层 · ShopAgentGraph（W5D4 起）"]
+        G["START → loadMemory → chat → persistMemory → END<br/>记忆读写显式节点化 · token 流节点内旁路"]
     end
     subgraph TOOLS["工具层 · userId 走 ToolContext 注入"]
-        QT["查询工具<br/>queryOrder · queryLogistics<br/>searchProduct · recentOrders"]
+        QT["查询工具<br/>queryOrder · queryLogistics<br/>searchProduct · productDetail · recentOrders<br/>searchKnowledge（RAG）"]
         TT["交易工具<br/>placeOrder · refundOrder · cancelOrder"]
     end
     subgraph GUARD["闸序编排 infra/"]
@@ -25,23 +24,28 @@ flowchart LR
         AUD["TradeAuditLogger<br/>审计 · 尽力而为"]
     end
     subgraph SVC["业务层"]
-        QS["OrderService · LogisticsService<br/>ProductService"]
+        QS["OrderService · LogisticsService<br/>ProductService（详情走两级缓存）"]
+        KS["KnowledgeService<br/>召回 top5 → 阈值截断 → 规则重排 top3"]
         TS["TradeService<br/>原子扣库存 · 状态机"]
     end
-    H2[("H2 内存库<br/>订单 · 审计日志<br/>W7 切 MySQL 8")]
-    RED[("Redis + Redisson<br/>RLock 分布式锁<br/>幂等 mark/result")]
+    H2[("H2 内存库<br/>订单 · 审计日志 · 商品<br/>W7 切 MySQL 8")]
+    RED[("Redis + Redisson<br/>RLock 分布式锁 · 幂等 mark/result<br/>L2 商品缓存 · 热点计数")]
+    VEC[("Redis Stack · RediSearch<br/>shopagent-knowledge 向量索引<br/>DashScope text-embedding-v4 1024 维")]
+    L1[("Caffeine L1<br/>商品展示字段 500/60s")]
 
-    UI -->|"fetch SSE"| API --> CC
-    CC <-->|"ReAct 决策"| QT
-    CC <-->|"二次确认后"| TT
-    CC <--> MEM
+    UI -->|"fetch SSE"| API --> G
+    G <-->|"ReAct 决策（九工具）"| QT
+    G <-->|"记忆读写节点"| MEM[ChatMemory<br/>InMemory · W6 换 Redis]
     QT --> QS --> H2
+    QT --> KS --> VEC
+    QS -.->|"展示字段缓存 · stock 永不缓存"| L1
+    L1 -.->|"L2 miss 回源"| RED
     TT --> TG --> TS --> H2
     TG -.->|"tryLock / SETNX"| RED
     TG --> AUD --> H2
 ```
 
-**分层铁律**：`tools/` 只做参数校验和编排，业务逻辑进 `service/`，横切能力（幂等/锁/审计）在 `infra/`。工具统一返回 `ToolResult{code, msg, data}`，异常在工具内消化不抛给模型；交易工具经 `TradeGuard` 统一闸序（锁外快查→抢锁→幂等→审计→解锁）后才进业务层——正确性不依赖模型的自觉，闸序写在代码里。
+**分层铁律**：`tools/` 只做参数校验和编排，业务逻辑进 `service/`，横切能力（幂等/锁/审计/缓存/RAG）在 `infra/`。工具统一返回 `ToolResult{code, msg, data}`，异常在工具内消化不抛给模型；交易工具经 `TradeGuard` 统一闸序（锁外快查→抢锁→幂等→审计→解锁）后才进业务层——正确性不依赖模型的自觉，闸序写在代码里。
 
 ## 技术栈
 
@@ -100,6 +104,9 @@ curl -X POST -H "Content-Type: application/json" `
 - **退款/取消工具（W3D5）**：`TradeGuard` 统一闸序编排（result 锁外快查→抢锁→幂等→解锁，三工具共用）；退款状态机（已发货/已送达→已退款，退款中→已在流程，待付款→引导取消）、取消状态机（仅待付款）+ 按订单快照还库存；归属校验沿用「他人订单与不存在同话术」
 - **混沌测试（W4D1-2）**：dev-only 直连端点（`DevChaosController`，`@Profile("dev")`）绕过 LLM 直打工具层完整闸序，保证并发场景确定性。C1 同键并发 ×10 → 仅 1 单、10 路全部返回首次结果；C2 异键并发 ×50 → 50 单全部落库、库存 60→9 精确扣 50 零超卖；C3 同订单退款并发 ×10 → 全部返回首次退款结果、库存只还一次；C4 Redis 停机 → 交易 fail-closed「交易暂不可用」、查询链路（纯 H2）不受影响、Redis 恢复后交易自愈。脚本与证据存 `docs/chaos/`，可一键复现
 - **交易审计日志（W4D3）**：`trade_audit_log` 表记录每次到达闸序的尝试（首执/重放各一条，同 idempotent_key 串成时间线）；`TradeGuard` 双出口埋点——业务结果锁内随写（并发下审计顺序与实际执行顺序一致）、重放命中锁外快查即写；审计尽力而为不阻断交易（主交易已提交，审计失败仅 warn 兜底）；`placeOrder` 订单号留空经幂等键关联，退款/取消带 orderNo
+- **知识库 RAG（W5D1-2）**：商品域语料 40 条 → DashScope text-embedding-v4（1024 维）→ Redis Stack FLAT 向量索引；`KnowledgeIndexer` 指纹幂等启动（不变跳过/变更全量重建/分批≤10/fail-open）；`searchKnowledge` 召回 top5→阈值 0.5 截断→bigram 标题加权重排 top3；LLM 冒烟 10/10（事实全准/链式调用/无关问题零注入，证据 `docs/rag/`）
+- **两级缓存（W5D3）**：`TwoLevelCache` L1 Caffeine 500/60s + L2 Redisson 30min，商品展示字段缓存而**库存永不缓存**（`ProductDetailVO` 编译期无 stock 字段）；Cache Aside 先更库再双删实测回源新值；热点穿透计数打标；降级矩阵实测 Redis 停机→交易 fail-closed/缓存透传/知识降级聊天照常（证据 `docs/cache/`、`docs/chaos/C5`）
+- **Graph 编排升级（W5D4）**：ChatClient 直连 → `ShopAgentGraph` 状态图（START→loadMemory→chat→persistMemory→END），记忆读写显式节点化、token 流节点内旁路（spike 实证图 state 克隆边界，旁路对象走 invocation 持有表）；SSE 五类事件与前端零改动，断连语义改进（图照跑记忆照落，重放由幂等闸收束）
 - **工具调用可视化**：前端实时显示「🔍 正在查询订单 10001…」，回答打字机逐字输出
 - **身份注入防越权**：userId 走 ToolContext，模型无法伪造调用方身份；工具层订单归属校验
 
@@ -193,6 +200,66 @@ dev-only 直连端点（`@Profile("dev")`）绕过 LLM 直打工具层完整闸�
 3. **Redis 单点**：单机 Redisson 无主从/哨兵。fail-closed 保证 Redis 不可用时宁可拒绝交易也不裸跑——正确性优先于可用性的显式取舍，生产需集群化。
 4. **审计不在业务事务内**：主交易提交后尽力写，极端情况可能缺记录——「物证」定位与强一致的取舍，不阻断交易是第一原则。
 
+## RAG 与多级缓存设计（W5 实录）
+
+> 核心命题：让模型「按知识库说话」而不是按参数记忆说话；让商品读取「快」而不「脏」。两条边界：**token 流不穿过图状态**（spike 实证），**库存永不进缓存**（正确性字段零缓存）。
+
+### RAG 检索分层（`infra/rag/` + `service/KnowledgeService`）
+
+| 层 | 实现 | 关键决策（Why） |
+|---|---|---|
+| 语料 | `knowledge/*.md` 40 条：8 商品×4（3 FAQ+1 规格）+ 平台政策 8 | 单条 FAQ=单文档（<500 字整条入索引不做切分——切分策略服务规模）；商品与 data.sql 严格对齐 |
+| 索引 | `KnowledgeIndexer`：语料全集 sha256 指纹存 Redis，**指纹幂等启动** | 指纹不变跳过（重启零 API 调用）、变更→`FT.DROPINDEX DD` 全量重建、分批 ≤10 条/批（DashScope 上限）、失败不存指纹下次自动重试、**fail-open 不阻断启动** |
+| 向量 | Redis Stack RediSearch FLAT 索引 `shopagent-knowledge`，DashScope text-embedding-v4（1024 维） | FLAT 精确 KNN：几十条规模下 HNSW 近似无收益还多一层解释成本；主 bean `initializeSchema=false`（dummy Key 也能启动，建索引时机归 Indexer） |
+| 召回 | top-5 + 相似度阈值 0.5 截断 | D2 实测定稿：命中分 0.73-0.95（top1 ≥0.87），无灰色地带垃圾召回；无关问题（天气）Prompt 路由直接零工具调用 |
+| 重排 | 规则重排 top-3：向量分打底 + 标题整句命中 +0.30 / 字符 bigram 命中比例 ×0.10 | 不引 reranker 模型：多一次 API 调用不值，且「重排要不要上模型」是按规模分层的面试叙事；中文无分词，bigram 是最轻量确定性匹配 |
+| 注入 | top-3 结构化 data（title/content/source/docType/productId/score） | 零召回→notFound 引导话术，模型诚实告知不编造 |
+
+**双模型路由**（`spring.ai.model.chat=openai` + `embedding=none` + `"embedding.text"=dashscope` 三键互斥）：SAA 的 embedding 条件键是非标准的 `embedding.text`，且各路由条件 `matchIfMissing=true`——漏掉 `embedding=none` 会出现两个 EmbeddingModel 启动冲突。
+
+### 编排升级：ChatClient 直连 → ShopAgentGraph（W5D4 spike 制）
+
+`START → loadMemory → chat → persistMemory → END`：记忆从 ChatClient Advisor 显式化为图节点（窗口语义不变，行为等价），chat 节点内 `chatClient.stream() → Sinks.Many` 旁路推 SSE，前端零改动。
+
+**spike 实证的边界**：图在节点间用序列化器**克隆 state**——Sinks.Many、带 lambda 的 ToolContext 一进 state 即 `JsonMappingException`。解法：响应式旁路对象走 invocation 持有表（UUID 键），state 只承载可序列化值（整段 answer / 历史消息）。这正是「图节点粒度=整段，token 流必须旁路」的实证（§2.5 spike 核心问题）。附带收益：SSE 断连只取消订阅，图照跑、记忆照落，重发同句由交易幂等闸收束。
+
+### 缓存边界与一致性（`infra/cache/TwoLevelCache`，方案 A）
+
+| 方案 | 说明 | 判断 |
+|---|---|---|
+| **A（已选定）缓存边界=展示字段** | `ProductDetailVO`（name/description/price/category）进两级缓存，**库存不进** | 库存是交易正确性字段：每单扣减→每单失效，缓存形同虚设（失效风暴）；stock 永远实时查库，交易链路零接触（W3 成果零风险） |
+| B 全实体缓存+变更双删 | 含 stock，下单/退款/改价都双删 | 扣库存高频双删把命中率打崩，与「热点缓存」目标自相矛盾（未选） |
+
+两级结构（手写不用 Spring Cache 抽象——面试要讲清每一层）：L1 Caffeine `maximumSize=500, expireAfterWrite=60s`（本地无失效广播，60s=不一致窗口上限）· L2 Redisson RBucket `cache:product:detail:{id}` TTL 30min（JSON+StringCodec，redis-cli 直读可演示）。读路径 L1→L2→库，**回填 L2 先 L1 后**；L2 读/写/删故障全部 fail-open 降级（缓存是加速器不是正确性来源）；查无商品不缓存负结果。热点打标：仅穿透（L1 miss）时 `INCR`+`EXPIRE IF NOT SET`——口径=跨进程数据访问量，只做指标不做调度，数字 W7 JMeter 出。
+
+**一致性（Cache Aside 先更库再双删，dev 端点 `POST /api/dev/cache/update-product` 实测 59.00→66.00→回源新值）**：先删缓存再更库的窗口内，并发读把旧值回填进缓存并驻留到 TTL（脏数据长期化）；先更库再删缓存最多容忍一个短暂旧值窗口=最终一致。
+
+### 分级降级矩阵（C5 实测，证据 `docs/chaos/C5-degradation-matrix-w5.txt`）
+
+Redis 停机时按业务代价分级——**交易错一笔是真金白银，知识答错一句是体验问题**：
+
+| 能力 | 停机时行为 | 语义 | 恢复 |
+|---|---|---|---|
+| 交易 | `code 50001「交易暂不可用」`拒绝执行 | **fail-closed**（宁可不做不可重复，W3 定稿） | 秒级重连自愈 |
+| 查询 | 纯 H2 不受影响 | 天然隔离 | — |
+| 商品详情 | L1 仍有本地缓存；未命中→透传走库（`hotspotCount` 读数降级 -1） | **fail-open** | L2 随重连回填 |
+| 知识检索 | error code「知识库暂不可用」，模型诚实告知并引导，**聊天主链路照常** | **fail-open** | 应用重启触发指纹重建（运行时索引丢失自愈为已知局限） |
+
+### 面试三层追问预演
+
+| 追问 | 应答要点 |
+|---|---|
+| 为什么 token 流不穿过图状态？ | 图在节点间序列化克隆 state（spike 实证：sink 一进 state 即炸）；图的价值在**编排因果序**（记忆读写节点化），token 流是传输细节，旁路（Sinks.Many→SSE）让两者正交——通过才迁的 spike 制就是为这个结论服务的 |
+| 为什么 60s 的 L1 TTL 敢叫「一致」？ | 本地缓存无失效广播，TTL=不一致窗口上限；正确性由「先更库再删缓存+库存不入缓存」保证：展示字段最多旧 60s 且改价即双删，库存永远实时——**不一致有界且不碰交易正确性** |
+| 为什么知识库 fail-open 而交易 fail-closed？ | 分级降级按业务代价：交易重复执行是真金白银（幂等/锁闸序宁可拒绝），知识答错一句是体验问题且模型会诚实说「知识库暂不可用」——同一个 Redis，两种恢复语义，矩阵实测 |
+
+### 已知局限与改进方向
+
+1. **运行时索引丢失不自愈**：Redis Stack 重启丢内存态（索引+指纹同失），需应用重启触发 Indexer 重建。改进方向：search 命中「No such index」时触发运行时重建（带防抖）。
+2. **热点打标只有计数**：无动态 TTL/淘汰调度（砍单线：打标是手段，调度是策略），数字与调度策略留给 W7 JMeter。
+3. **知识库只覆盖商品域** 40 条：不做通用爬取（砍单线），召回质量靠语料 fixture 迭代。
+4. **重排是规则不是模型**：bigram 匹配对同义改写无感知（「防水吗」vs「能碰水吗」靠向量分兜底），规模化后 reranker 是第一升级项。
+
 ## 模型切换
 
 W5D0 起聊天与 embedding 分路由（`spring.ai.model.*` 路由键，双 starter 共存零冲突）：
@@ -210,7 +277,9 @@ W5D0 起聊天与 embedding 分路由（`spring.ai.model.*` 路由键，双 star
 5. **幂等结果 JSON 往返 BigDecimal scale 变化**：ToolResult 存 Redis 后读出，`59.00` 变 `59.0`——混沌 C3 判定用字符串比较误报「两次金额」。数值语义必须按数值比较，别拿 scale 当身份。
 6. **PowerShell 5 `Invoke-RestMethod` 中文乱码**：无 charset 的 JSON 响应按 ISO-8859-1 解码，中文 msg 内存级 mojibake 且会写进证据文件。修复：按 Latin-1 取回字节再以 UTF-8 还原。
 7. **Redis Stack 镜像获取死局四连坑（W5D0 实录）**：①Docker Hub 官方镜像与十余加速站全不可达（TLS 超时/403/缺层）→ 官方镜像路径死；②改用官方 apt 源 `packages.redis.io` 自建，但 **BuildKit 构建期网络与 run 容器不同路径**（run 容器可达、build 三连败；另两个前置坑：底座无 ca-certificates 致 https 源静默失败、TUN 代理 fake-ip 劫持容器 DNS 需 `--add-host` 钉真实 IP）；③宿主机直连可达后一查包索引：**bookworm 源里根本没有 redis-stack-server 包**——就算 build 网络通了 apt 也会报「无法定位软件包」（包只在 bullseye/jammy 源）；④bullseye 版 deb 链 OpenSSL 1.1（bookworm 底座无 1.1），**选 jammy 版**——与官方 Docker 镜像底座（ubuntu22.04/libssl3）同构，bookworm glibc 2.36 向下兼容。**终极解法：宿主机下载 deb（SHA256 校验）→ 多阶段构建（unpack 阶段 `dpkg -x`，`COPY --from` Linux→Linux 保权限）→ 全程零网络，BuildKit 问题不复存在**。方法论：构建期网络死局优先「把网络操作移出构建」而非「修构建网络」。
+8. **Graph state 不能装「活对象」（W5D4 spike）**：SAA Graph 在节点间用序列化器**克隆 state**（JacksonStateSerializer.cloneObject），把 Sinks.Many/带 lambda 的 ToolContext 放进 state 直接 `JsonMappingException`。解法：不可序列化的请求态走 invocation 持有表（UUID 键 + ConcurrentHashMap），state 只承载可序列化值；历史消息用 `SpringAIStateSerializer` 保 Spring AI 类型。教训：图的 state 是「跨节点业务事实」，不是「请求上下文容器」。
+9. **Redis Stack 重启丢内存态（W5D5）**：`docker stop/start` 后向量索引、文档、指纹键全部蒸发（Redis Stack 默认不落 RDB）——知识检索持续「暂不可用」直到应用重启触发 Indexer 指纹重建。自愈边界按设计定稿收敛在启动期；生产口径 = 向量索引开 AOF/独立故障域（与幂等/锁/缓存分离，§2.2 面试点）。
 
 ## 当前进度
 
-W5 进行中：W5D0 完成（依赖四件落地 + 双模型路由 `chat=openai`+`embedding.text=dashscope` 三键互斥 + Redis Stack 容器自建换装 + C1 混沌回归 PASS）。W4 已收官：交易安全三件套（幂等/锁/审计）全链路完成，混沌测试 C1-C4 全 PASS（证据 `docs/chaos/`），README 交易安全设计章节 + 架构图刷新到位。W1-2 MVP（查询工具/SSE/前端/安全边界）已完成。W5 接下来：知识库构建 → 检索工具 → 两级缓存 → Graph spike。路线图见 `shopagent-master-plan.md`，W5 任务清单见 `shopagent-w5-tasks.md`。
+**W5 收官**：RAG + 多级缓存 + Graph 编排全链路完成——Redis Stack 向量库（40 条商品域语料，指纹幂等启动）+ `searchKnowledge` 召回/重排/注入（LLM 冒烟 10/10）+ 两级缓存（库存永不缓存，改价双删回源实测）+ `ShopAgentGraph` 三节点编排（spike 通过才迁，token 流旁路）；分级降级矩阵实测（交易 fail-closed / 知识缓存 fail-open）；混沌 C1-C4 回归全 PASS + 单测 94/94；README「RAG 与多级缓存设计」章节 + 架构图（graph/knowledge/vector/cache 节点）刷新到位。W4 交易安全三件套（幂等/锁/审计）+ W1-2 MVP 前置完成。接下来 W6 稳定性三件套：LLM 限流熔断降级 + 会话记忆 Redis 化 + 结构化观测。路线图见 `shopagent-master-plan.md`，W5 任务清单见 `shopagent-w5-tasks.md`。
