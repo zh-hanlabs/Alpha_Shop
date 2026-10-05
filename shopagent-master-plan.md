@@ -82,7 +82,7 @@ shopagent/
 | W3-4 | **交易安全（核心）** | 下单/退款工具 + 幂等 + Redisson 锁 | ⭐⭐⭐ | ✅ 2026-10-03 |
 | W5 | RAG + 缓存 | 商品知识库问答 + 热点多级缓存 | ⭐⭐ | ✅ 2026-10-04 |
 | W6 | 稳定性 | LLM 限流熔断降级 + Redis 会话记忆 | ⭐⭐ | ✅ 2026-10-04 |
-| W7 | 数字 + 部署 | JMeter 压测 + Docker Compose + H2→MySQL | ⭐⭐ | 🔄 W7 开工 2026-10-04 |
+| W7 | 数字 + 部署 | JMeter 压测 + Docker Compose + H2→MySQL | ⭐⭐ | ✅ 2026-10-05 |
 | W8 | 打磨 | 简历措辞 + 三层追问准备 + commit 整理 | 收口 | ⬜ |
 
 > W1-2 已有逐日清单见 `shopagent-w1w2-mvp-tasks.md`，下文从 W3 起展开。

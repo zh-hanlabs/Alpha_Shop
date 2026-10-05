@@ -29,7 +29,9 @@ CREATE TABLE IF NOT EXISTS order_item (
     product_id   BIGINT        NOT NULL,
     product_name VARCHAR(100)  NOT NULL,
     quantity     INT           NOT NULL,
-    unit_price   DECIMAL(10,2) NOT NULL
+    unit_price   DECIMAL(10,2) NOT NULL,
+    -- W7D5 与 schema-mysql.sql 对齐：order_item 唯一键（init 幂等 5/5 表；H2 内存库实际不触发，防漂移）
+    CONSTRAINT uk_order_item_order_product UNIQUE (order_no, product_id)
 );
 
 CREATE TABLE IF NOT EXISTS logistics (

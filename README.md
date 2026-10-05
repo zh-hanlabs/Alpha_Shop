@@ -30,8 +30,8 @@ flowchart LR
         KS["KnowledgeService<br/>召回 top5 → 阈值截断 → 规则重排 top3"]
         TS["TradeService<br/>原子扣库存 · 状态机"]
     end
-    H2[("H2 内存库<br/>订单 · 审计日志 · 商品<br/>W7 切 MySQL 8")]
-    RED[("Redis + Redisson<br/>RLock 分布式锁 · 幂等 mark/result<br/>L2 商品缓存 · 热点计数")]
+    H2[("MySQL 8.4（W7 双 profile，ADR D8）<br/>订单 · 订单项 · 审计 · 商品 · 物流<br/>dev 默认 H2 clone 即跑 · dev,mysql 走 MySQL<br/>compose 命名卷 · init 幂等 5/5 表（W7D5 补齐）")]
+    RED[("Redis + Redisson（compose redis-stack 本地镜像 + AOF）<br/>RLock 分布式锁 · 幂等 mark/result<br/>L2 商品缓存 · 热点计数")]
     VEC[("Redis Stack · RediSearch<br/>shopagent-knowledge 向量索引<br/>DashScope text-embedding-v4 1024 维")]
     L1[("Caffeine L1<br/>商品展示字段 500/60s")]
 
@@ -48,6 +48,9 @@ flowchart LR
     TT --> TG --> TS --> H2
     TG -.->|"tryLock / SETNX"| RED
     TG --> AUD --> H2
+    JM["JMeter 5.6.3（W7）<br/>S1 缓存 / S2 交易 / S3a 聊天 / S3b SSE<br/>JTL+HTML 与 TurnMetrics 日志双源取数"] -.->|"dev 端点直打 + chat 过限流闸"| API
+    CP["docker-compose（W7D4）<br/>redis-stack 本地镜像 + mysql:8.4<br/>healthcheck 就绪序 · app 宿主机或容器化"] -.->|"编排中间件"| RED
+    CP -.-> H2
 ```
 
 **分层铁律**：`tools/` 只做参数校验和编排，业务逻辑进 `service/`，横切能力（幂等/锁/审计/缓存/RAG）在 `infra/`。工具统一返回 `ToolResult{code, msg, data}`，异常在工具内消化不抛给模型；交易工具经 `TradeGuard` 统一闸序（锁外快查→抢锁→幂等→审计→解锁）后才进业务层——正确性不依赖模型的自觉，闸序写在代码里。
@@ -345,6 +348,42 @@ CLOSED --5 连败(5/5=100%≥50%, min5 满)--> OPEN --短路(瞬时, notPermitte
 5. **token usage 口径**：`stream-usage` 已开、graph 逐 chunk 捕获，桩环境拿不到 → `promptTokens/completionTokens=null`（N/A）+ `answerChars` 字符数代理（`usageHits` 覆盖率可视化）；真 DeepSeek 是否回传待真 Key 环境复测。
 6. **降级话术意图分类是关键词规则**：不做 NLU，复杂表述可能落兜底（安全红线类交易关键词覆盖优先，宁可错杀）。
 
+## 压测与部署（W7 实录）
+
+> 取数双源与全部证据：`docs/jmeter/`（JMX/JTL/解析输出 + w7d2 基线 + w7d3 矩阵两份报告）；环境口径=单机 localhost、JMeter 5.6.3 CLI、JDK 21、应用 `dev,mysql`。
+
+### 压测矩阵数字（W7D2 基线 + W7D3 落袋）
+
+| 场景 | 形态 | 结果 |
+|---|---|---|
+| **缓存冷/热（硬指标②）** | 冷=重启清 L1+DEL 目标 L2 键；热=预热 | 冷 344.8/s（冷窗穿透 P50=160ms，真 dogpile）→ 热稳态 **3514.9/s ≈ 10.2 倍**；P95 162ms→23ms ≈ 7 倍；同 JVM evict 探针隔离纯缓存贡献：回源 28ms vs L1 命中 3-4ms |
+| **限流关/开（硬指标①）** | 同形突发 300 请求（10 线程） | 限流关 300 全过 vs 限流开**放行 10、429 拒绝率 96.67%**；全局桶 10/s 精确核验=突发恰放 10 + 持续满秒 admit=10；双源对账 限流开 31 OK+470 RL / 限流关 501 轮全 OK |
+| 交易异键 ramp-up | 100 线程 / 10s 爬升 / 200 单 | 0% 错误，库存 500→300 **精确对账零超卖** |
+| 交易同键 ×100 并发 | 全新幂等键 100 路重放 | 全返首次、仅 1 单落库（Avg=849ms=锁排队代价，随并发线性：t50=495ms→t100=849ms） |
+| 聊天链路吞吐（桩 LLM） | 50 线程 ×2 环 | 96.5/s，P50=20ms / P95=45ms，0% 错误 |
+| SSE 流式（PS5 兜底，插件无 POST body 能力） | 10 用户 ×3 请求 | 30/30 done 收尾、ttfb P50=14ms |
+| **真 LLM 小样本** | 真 DeepSeek 16+1 请求 | 首 token P50=**735ms**/P95=1041ms；整轮 P50=**1045ms**/P95=1524ms；usage 真回传 17/17；链路开销（totalMs−llmMs）<6% |
+
+### 取数口径声明（面试必讲）
+
+- **桩=链路吞吐，非 LLM 能力**：聊天压测打本地 OpenAI 协议桩（确定性/免费/无配额污染），数字=「限流闸→记忆读→Graph→LLM 桩→工具→persist」工程链路能力；真 LLM 小样本单独报体感参照——**两个口径分开陈述**（96.5/s vs ~1s/轮）。
+- **双源对齐**：客户端=JMeter JTL/HTML；服务端=TurnMetrics 单行 JSON 日志解析（环形缓冲仅 100 轮，压测以日志文件为准）。两组数字逐条对上（如限流开组服务端 470 RATE_LIMITED = 客户端 470 个 429）。
+- **口径陷阱如实声明**：S1 的 `getStock` 每请求实时查库（缓存只省 detail JSON 查询）；冷组含 JVM 冷启动因素（设计口径「重启=冷」，另做同 JVM evict 探针隔离）；CSV 每 JMeter 进程从头读，跨进程重复 userId 命中幂等重放（样本数≠新订单数，按 audit 对账）；usage 桩不回传=N/A+answerChars 代理。
+
+### 面试三层追问预演
+
+1. **数字怎么来的？**——双源对账：JMeter 客户端计数/分位 ↔ TurnMetrics 服务端 outcome/llmMs 日志逐条吻合；交易场景用库存 delta+audit 表三方核对。
+2. **瓶颈在哪？**——缓存链路瓶颈=MySQL 实时库存查询（故热稳态 P95 12ms 是地板）；聊天链路瓶颈=LLM 生成（桩 96.5/s vs 真 ~1s/轮，链路自身 <6%）——**限流护盾打在真瓶颈之前**；同键并发延迟=锁排队（正确性换时延的明码标价）。
+3. **为什么桩测？**——确定性（回归可比）、成本（万级样本零 API 费）、口径隔离（工程链路能力与模型能力解耦）；真 LLM 只小样本验体感与 usage 回传。
+
+### 已知局限
+
+单机 localhost 压测（无网络抖动/无分布式干扰）；HikariCP 起步默认池 10 未调优（数字未受 DB 等待扭曲时不动）；userId 可伪造维持 W6 记录（压测参数化恰好依赖它）；压测数据残留（product 2 库存 299→fixture 重置历史见各证据 md）；真 LLM 小样本 n=17 不做统计显著性声明。
+
+### 部署形态
+
+`docker-compose up -d` 拉起 redis-stack（本地镜像禁 pull + **AOF 持久化**，W7D5 加固）+ MySQL 8.4（healthcheck 就绪序：带密码 root ping 防 init 临时 server 误报）→ 应用 `dev,mysql` 双 profile（宿主机或 `--profile fullstack` 容器化）。克隆三步见「快速启动」；部署冒烟证据（克隆体验/查问办/C2 抽查/索引重建）见 `docs/deploy/w7d4-compose-smoke.md`。
+
 ## 模型切换
 
 W5D0 起聊天与 embedding 分路由（`spring.ai.model.*` 路由键，双 starter 共存零冲突）：
@@ -368,7 +407,11 @@ W5D0 起聊天与 embedding 分路由（`spring.ai.model.*` 路由键，双 star
 11. **`ForEach-Object` 里的 `break` 会静默终止整个脚本（W6D5）**：C5 的 PING 等待循环用 `if (PONG) { break }`，首轮 PING 就 PONG 时脚本在 Tee 前无声死掉（exit 0、证据文件不落盘）——`break` 在无外层循环的 scriptblock 里是「终止脚本」语义。修复：for 循环 + 标志位。排查之难在于零输出零报错，靠逐行插桩定位。
 12. **RRateLimiter 桶键结构（W6D0/D1）**：主键+内部键 `{主键}:value/{主键}:permits`（花括号 hash-tag 开头），`--scan`/`deleteByPattern` 模式必须带前导 `*` 才能扫到内部键，否则孤儿堆积；PER_CLIENT 是按 Redisson 客户端实例分桶不是按终端用户（内部键带 clientId 后缀）。
 13. **Resilience4j 2.4 API 与旧资料不一致（W6D3）**：Builder 是 `slidingWindowType()`+`slidingWindowSize()` 两方法（无 `slidingWindow(type, n)`）；状态迁移方法名 `transitionToForcedOpenState()`；`getNumberOfNotPermittedCalls()` 返回 long——照旧版博客写必编译错。
+14. **调限流参数必须清存量桶（W7D2）**：Redisson `trySetRate` 是 try 语义——只在桶不存在时生效，重启应用改 `resilience.rate-limit.*` 不影响 Redis 里活着的桶；且内部键带 hash-tag（`{主键}:permits/:value`），只删主键后残留的半删状态（配置已新、计数仍旧）行为仍是旧限流值。切限流组 runbook=`--scan --pattern '*rlimit*'` 全删。实测：半删后 S3b 仍 20/30 被拒，全删后 0 拒。
+15. **JMeter 遇已存在 JTL 拒绝启动（W7D2）**：`-l` 文件存在时报错退出，连 "Starting standalone test" 都不打印——输出被 grep 过滤后表现为「静默无 summary」。跑批前删 JTL 与报告目录。同场加映：JTL 是带引号多行字段的 CSV（断言失败消息含换行），`wc -l` 推样本数会假溢出，按 CSV 解析。
+16. **持久化库 init 重跑 × 缺唯一约束 = 种子数据翻倍（W7D5，本周期最重要的坑）**：`order_item` 只有自增主键，无 (order_no, product_id) 唯一键——H2 内存库每次启动都是全新库永远踩不到；MySQL 持久化卷上应用重启两次 init 后种子明细翻倍（16 行），`continue-on-error` 只兜得住有唯一键的表，C3 退款回归「还库存 ×2」就此钓出。幂等/锁/状态机全部无辜（审计 10 条同键 code=0、条件迁移只中一次），是**测试夹具被污染**。修复：双平台 schema 补 `uk_order_item_order_product` + 存量去重 + ALTER——init 幂等从 4/5 表补齐 5/5 表。教训：`CREATE TABLE IF NOT EXISTS` + `continue-on-error` 的「幂等」只覆盖有唯一键的写入；换持久化库必须重审所有 seed 的唯一性。
+17. **redis-stack-server 停机不落 RDB（W7D5）**：deb 版 `redis-stack-server` 不透传 SIGTERM 落盘（redis 日志证实最后一次 BGSAVE 与 stop 间隔 17 分钟且 stop 时无 save），`docker stop/start` 后自上次周期 BGSAVE 起的写入全丢——C5 矩阵 E「恢复后知识事实回归」失败（索引蒸发），幂等标记/会话记忆同窗受损。修复：compose 显式 `--appendonly yes --save 60 1` + 重启写入存活实测；知识索引按设计由应用重启指纹重建兜底（与 W5D5 踩坑 #9 一脉相承，本次补上部署层根治）。
 
 ## 当前进度
 
-**W6 收官**：稳定性三件套全链路完成——双层分布式限流（Redisson RRateLimiter 用户桶+全局桶，D0 语义冒烟定稿）+ 会话记忆 Redis 化（`RedisChatMemoryRepository`，重启/跨实例记忆连续）+ LLM 熔断（Resilience4j，5 连败 OPEN→半开探测状态机实测）+ 规则回复降级（5 类意图、交易只引导、SSE 打字机体感不变）+ 结构化观测（轮级 outcome/耗时/token/工具清单，单行 JSON + 环形缓冲 100）；混沌 C1-C7 回归全 PASS（C6 限流突刺/C7 熔断注入为 W6 新增，C5 脚本顺手修出两个潜伏 bug）+ 双实例无状态演证（跨实例记忆连续 + 全局桶跨实例共享 10 过 2 拒）；单测 140/133 绿。README「稳定性设计」章节 + 架构图（限流闸/熔断降级/观测/Redis 记忆节点）刷新到位。W5（RAG+缓存+Graph）、W4（幂等/锁/审计）、W1-2（MVP）此前完成。接下来 W7 压测与部署：JMeter 报告（限流前后对比/缓存命中提升）+ Docker Compose 一键起 + H2→MySQL。路线图见 `shopagent-master-plan.md`，W6 任务清单见 `shopagent-w6-tasks.md`。
+**W7 收官（数字 + 部署）**：JMeter 四组脚本（S1 缓存 / S2 交易异键+同键 / S3a 聊天桩 / S3b SSE）+ TurnMetrics 日志解析双源取数；**DoD 两项硬指标落袋**——缓存冷热 344.8/s→3514.9/s ≈10.2 倍（P95 162→23ms）、限流关/开同形突发 300 全过 vs 放行 10（96.67% 429、全局桶 10/s 精确核验）；交易 ramp-up 200 单零超卖库存精确对账 + 同键 100 并发仅 1 单；真 DeepSeek 小样本（首 token P50=735ms、整轮 P50=1045ms、usage 真回传 17/17、链路开销 <6%）；**Docker Compose 一键部署**（redis-stack 本地镜像禁 pull + MySQL 8.4 healthcheck 就绪序 + app 容器化加分项 `--profile fullstack`）+ 克隆体验验证（空库 init 自动播种 + 向量索引指纹重建）；H2→MySQL 双 profile（dev 默认 H2 clone 即跑零动，压测/部署走 `dev,mysql`）；混沌 C1-C7 最终构建回归全 PASS（C3 首跑钓出 order_item init 幂等缺口并修复，C5 钓出 redis 停机不落盘并以 AOF 加固）+ 单测 140/133 绿。README「压测与部署」章节 + 架构图（MySQL/Compose/JMeter 边界）+ 踩坑 #14-17 刷新到位。W1-W6（MVP/交易安全/RAG+缓存/稳定性）此前完成。剩 W8 打磨：简历措辞 + commit 整理。路线图见 `shopagent-master-plan.md`，W7 任务清单见 `shopagent-w7-tasks.md`。

@@ -1,0 +1,6 @@
+== C7 phase2: recovery demo (stub LLM working) ==
+normal answer: MEMORY-CHECK: marker_hits=0 history_msgs=2
+force-open: {"state":"FORCED_OPEN","failureRate":-1.0,"bufferedCalls":0,"failedCalls":0,"successfulCalls":0,"notPermittedCalls":0}
+degraded reply while FORCED_OPEN: 高峰期，简单问题我直接答：我是小店，只服务购物相关咨询；您稍后再来，我给您详细答复～
+reset: {"state":"CLOSED","failureRate":-1.0,"bufferedCalls":0,"failedCalls":0,"successfulCalls":0,"notPermittedCalls":0}
+answer after reset (expect normal LLM reply): MEMORY-CHECK: marker_hits=0 history_msgs=6

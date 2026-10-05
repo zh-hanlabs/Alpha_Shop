@@ -1,0 +1,14 @@
+== C7 phase1: fault injection (LLM dead) ==
+state before: {"state":"CLOSED","failureRate":-1.0,"bufferedCalls":0,"failedCalls":0,"successfulCalls":0,"notPermittedCalls":0}
+[call-1] 200 0.817593s
+[call-2] 200 0.544900s
+[call-3] 200 0.554143s
+[call-4] 200 0.557702s
+[call-5] 200 0.552817s
+[call-6] 200 0.532607s
+state after 6 calls (expect OPEN, failedCalls>=5): {"state":"OPEN","failureRate":100.0,"bufferedCalls":5,"failedCalls":5,"successfulCalls":0,"notPermittedCalls":1}
+short-circuit timing: [call-7] 200 0.541032s  (expect <0.5s, not-permitted)
+state: {"state":"OPEN","failureRate":100.0,"bufferedCalls":5,"failedCalls":5,"successfulCalls":0,"notPermittedCalls":2}
+-- wait 21s (waitDurationInOpenState=20s) then probe: half-open fails -> back OPEN --
+[probe] 200 0.551639s
+state after probe (expect OPEN): {"state":"HALF_OPEN","failureRate":-1.0,"bufferedCalls":1,"failedCalls":1,"successfulCalls":0,"notPermittedCalls":0}

@@ -28,7 +28,7 @@
 - [x] 真 LLM 小样本延迟参照（D3 T3.4）：真 DeepSeek 16+1 请求，**首 token P50=735ms/P95=1041ms、整轮 P50=1045ms/P95=1524ms**，链路开销 <6%（totalMs−llmMs）——「链路吞吐 96.5/s（桩）≠ LLM 体感 ~1s/轮（真）」两口径分开陈述；**usage 真回传 17/17**（W6D4 预留的 stream-usage 验证收口）；README 口径段随 T5.2（主计划 §11 DoD，证据 docs/jmeter/w7d3/parse-real.txt）
 - [ ] 取数双源：JMeter JTL/HTML（客户端）+ TurnMetrics 单行 JSON 日志解析脚本（服务端 outcome/llmMs/工具分布），双源口径对齐写清
 - [x] Docker Compose 一条命令拉起全部依赖（redis-stack 本地镜像 + MySQL 8 + healthcheck + .env 注入，D4 实测 redis 6s→mysql 15s healthy 就绪序）+ README 克隆三步（草稿段已入 README，T5.2 打磨）+ 加分项 app 容器化入 fullstack profile
-- [ ] README「压测与部署」章节 + 架构图刷新 + 踩坑实录补条 + 混沌 C1-C7 回归 PASS + 主计划 W7 ✅ + commit `W7D{n}` 校对
+- [x] README「压测与部署」章节 + 架构图刷新 + 踩坑实录补条（#14-17）+ 混沌 C1-C7 回归 PASS（C3 修复后）+ 主计划 W7 ✅ 2026-10-05 + commit `W7D{n}` 校对通过
 
 ---
 
@@ -114,10 +114,10 @@
 
 ### D5：buffer + 收尾
 
-- [ ] T5.1 混沌回归 C1-C7 全 PASS（W7 动了数据源与部署形态，重点重验 C1/C2/C4）+ mvn test 全绿
-- [ ] T5.2 README「压测与部署」章节：压测矩阵数字表（限流前后 / 缓存冷热 / 交易并发 / SSE 流式）+ 取数口径声明（桩=链路吞吐非 LLM 能力、环形缓冲 vs 日志文件、双源对齐）+ 克隆三步启动 + 面试三层追问预演（数字怎么来的 / 瓶颈在哪 / 为什么桩测）+ 已知局限（单机 localhost 压测口径 / HikariCP 起步默认 / userId 可伪造维持 W6 记录）+ 架构图刷新（MySQL / Compose / JMeter 边界）+ 踩坑实录补条
-- [ ] T5.3 commit 校对（W7D0-D5 全部 `W7D{n}:` 格式）+ 硬性指标逐项核销 + 主计划 §3 W7 状态 ✅
-- [ ] （顺带清欠账）真 Key 环境补跑 W6D5 记录的 W1 冒烟清单 LLM 行为项（依赖真 LLM 的条目，口径已记录）
+- [x] T5.1 混沌回归 C1-C7 全 PASS（最终构建：C1 10/10 同订单号、C2 50/50 零超卖、**C3 首跑 FAIL→钓出 order_item 缺 (order_no,product_id) 唯一约束 ×持久化库 init 重跑致种子明细翻倍→还库存×2；修双平台 schema+去重+ALTER 后 PASS stockRestored=1，init 幂等补齐 5/5 表**、C4 停机 fail-closed 自愈、C5 矩阵 A-D PASS + E 钓出 redis-stack-server SIGTERM 不落 RDB→compose AOF+save60 加固（写入跨重启存活实测）+ 应用重启指纹重建验证、C6 四场景 PASS、C7 两阶段 CLOSED→5连败→OPEN→短路→半开 3 探测失败→回 OPEN→force-open 降级→reset 恢复）+ mvn test 140 中 133 绿+7 跳 BUILD SUCCESS（schema 修改前后各跑一次零动）
+- [x] T5.2 README「压测与部署」章节：压测矩阵数字表（硬指标①②+交易+SSE+真 LLM）+ 取数口径声明（桩=链路吞吐/双源对齐/口径陷阱四条）+ 克隆三步（D4 草稿段沿用）+ 面试三层追问预演 + 已知局限五条 + 架构图刷新（MySQL 双 profile/compose/JMeter 边界/Redis AOF）+ 踩坑实录补 #14-17
+- [x] T5.3 commit 校对（W7D0-D5 全部 `W7D{n}:` 格式，git log 逐条核）+ 硬性指标逐项核销（§一 全勾）+ 主计划 §3 W7 状态 ✅ 2026-10-05
+- [x] （顺带清欠账）真 Key 环境补跑 W1 冒烟清单 LLM 行为项：8 项全过（真 DeepSeek @compose 容器化应用；item3 预期按 W3 语义演化为二次确认；购物边界「不用问了」被拒仍走确认=双层防线实证；证据 docs/deploy/w7d5-w1smoke-replay.txt）；usage 真回传欠账已在 T3.4 清（17/17）
 
 ---
 

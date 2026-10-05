@@ -28,11 +28,16 @@ CREATE TABLE IF NOT EXISTS orders (
 -- 下单时快照商品名/单价，退款金额不随商品改价漂移（W3 依赖）
 CREATE TABLE IF NOT EXISTS order_item (
     id           BIGINT AUTO_INCREMENT PRIMARY KEY,
-    order_no     VARCHAR(20)   NOT NULL,
-    product_id   BIGINT        NOT NULL,
-    product_name VARCHAR(100)  NOT NULL,
-    quantity     INT           NOT NULL,
-    unit_price   DECIMAL(10,2) NOT NULL
+    order_no     VARCHAR(20)  NOT NULL,
+    product_id   BIGINT       NOT NULL,
+    product_name VARCHAR(100) NOT NULL,
+    quantity     INT          NOT NULL,
+    unit_price   DECIMAL(10,2) NOT NULL,
+    -- W7D5 回归修复：持久化库 init 重跑（应用重启/换部署形态）时 data 种子明细被重复插入
+    -- （continue-on-error 只兜得住有唯一键的表），restoreStock 按明细行数还库存即翻倍
+    -- ——C3 实测 stockRestored=2 钓出。补唯一键让重复 INSERT 落入同一兜底，init 幂等补齐 5/5 表。
+    -- 语义安全：place 每单每商品仅一行（数量走 quantity 列），种子数据 (order_no, product_id) 无重复
+    CONSTRAINT uk_order_item_order_product UNIQUE (order_no, product_id)
 );
 
 CREATE TABLE IF NOT EXISTS logistics (
