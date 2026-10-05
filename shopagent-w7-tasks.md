@@ -1,8 +1,8 @@
 # ShopAgent · W7 数字与部署开发任务清单
 
 > 目标版本：一周（D0-D5 六个工作日）：JMeter 压测（简历数字收口）+ H2→MySQL 8 双 profile 切换 + Docker Compose 一键部署
-> 原则：W7 是把前六周工程能力兑换成简历数字的收口周——主计划 §11（项目 DoD）两项硬指标「限流前后对比」「缓存命中提升的 QPS」必须落袋；**不破坏 W3 交易安全 / W5 RAG·缓存 / W6 稳定性的既有语义**
-> 配套：主计划 §7（任务依据，2026-10-04 随本清单新增，原 §7-§11 顺移为 §8-§12）· AGENTS.md（开发规则）· shopagent-w6-tasks.md §2.4（观测口径=压测取数源，勿重造）· shopagent-w3w4-tasks.md §2（幂等/锁口径勿动）· shopagent-w5-tasks.md §2（缓存边界与一致性语义勿动）
+> 原则：W7 是把前六周工程能力兑换成简历数字的收口周——主计划 §12（项目 DoD）两项硬指标「限流前后对比」「缓存命中提升的 QPS」必须落袋；**不破坏 W3 交易安全 / W5 RAG·缓存 / W6 稳定性的既有语义**
+> 配套：主计划 §7（任务依据，2026-10-04 随本清单新增，原 §7-§11 顺移为 §8-§12；2026-10-05 W8D0 新增 §8 W8 章节后再顺移为 §9-§13）· AGENTS.md（开发规则）· shopagent-w6-tasks.md §2.4（观测口径=压测取数源，勿重造）· shopagent-w3w4-tasks.md §2（幂等/锁口径勿动）· shopagent-w5-tasks.md §2（缓存边界与一致性语义勿动）
 
 ---
 
@@ -19,14 +19,14 @@
 
 硬性指标：
 
-- [ ] MySQL 双 profile：`dev,mysql` 激活下九工具 + 下单/退款全闸序 + 知识检索 + 两级缓存全链路跑通，utf8mb4 中文零乱码；dev 默认 H2 clone 即跑与单测口径（133 绿+7 跳）零动
-- [ ] 混沌 C1/C2 在 MySQL 上回归 PASS（幂等/锁/零超卖跨库不变）
-- [ ] JMeter 四组脚本：S1 缓存详情链路 / S2 交易下单并发 / S3a 聊天阻塞端点（桩 LLM）/ S3b SSE 流式（插件）——JTL + HTML 报告证据存档 `docs/jmeter/`
-- [x] 限流前后对比数字落袋（D3）：关/开同形突发 300 请求=300 全过 vs **10 放行/96.67% 429**；放行 P50 36→65ms、持续组 P95 24→48ms；**全局桶 10/s 精确放行核验=突发恰放 10 + 持续满秒 admit=10**；双源对账 限流开 31 OK+470 RL / 限流关 501 轮全 OK（主计划 §11 DoD 硬指标①，证据 docs/jmeter/w7d3/）
-- [x] 缓存命中提升数字落袋（D3）：冷（重启+DEL L2）344.8/s / 热稳态 **3514.9/s ≈ 10.2 倍**，P95 162ms→23ms ≈ 7 倍；隔离口径=同 JVM evict 后回源 28ms vs L1 命中 3-4ms（纯缓存贡献 ≈7 倍，冷窗余量为 JIT/池预热，S1 的 getStock 每请求实时查库口径已声明）（主计划 §11 DoD 硬指标②，证据 docs/jmeter/w7d3/）
-- [ ] 交易并发压测：ramp-up 异键并发零超卖、库存精确扣减；同键 ×N 并发全返首次
-- [x] 真 LLM 小样本延迟参照（D3 T3.4）：真 DeepSeek 16+1 请求，**首 token P50=735ms/P95=1041ms、整轮 P50=1045ms/P95=1524ms**，链路开销 <6%（totalMs−llmMs）——「链路吞吐 96.5/s（桩）≠ LLM 体感 ~1s/轮（真）」两口径分开陈述；**usage 真回传 17/17**（W6D4 预留的 stream-usage 验证收口）；README 口径段随 T5.2（主计划 §11 DoD，证据 docs/jmeter/w7d3/parse-real.txt）
-- [ ] 取数双源：JMeter JTL/HTML（客户端）+ TurnMetrics 单行 JSON 日志解析脚本（服务端 outcome/llmMs/工具分布），双源口径对齐写清
+- [x] MySQL 双 profile：`dev,mysql` 激活下九工具 + 下单/退款全闸序 + 知识检索 + 两级缓存全链路跑通，utf8mb4 中文零乱码；dev 默认 H2 clone 即跑与单测口径（133 绿+7 跳）零动——T1.2/T1.3 完成（全链路冒烟 docs/deploy/w7d1-mysql-smoke.txt + 混沌 C1/C2 回归 + 单测零动；W8D0 残账核销）
+- [x] 混沌 C1/C2 在 MySQL 上回归 PASS（幂等/锁/零超卖跨库不变）——T1.3 完成：C1 10/10 返首次 stockDelta=1、C2 50/50 零超卖 finalStock=10，证据归档 docs/chaos/C1-same-key-x10.txt、C2-diff-keys-x50.txt（W7D1 UTF-16 版）
+- [x] JMeter 四组脚本：S1 缓存详情链路 / S2 交易下单并发 / S3a 聊天阻塞端点（桩 LLM）/ S3b SSE 流式（插件）——JTL + HTML 报告证据存档 `docs/jmeter/`——T2.1-T2.3 完成：四脚本落仓（S3b 按 F4 探路定稿走 PS5 兜底）+ JTL/HTML + TurnMetrics 解析，证据 docs/jmeter/w7d2/、w7d3/
+- [x] 限流前后对比数字落袋（D3）：关/开同形突发 300 请求=300 全过 vs **10 放行/96.67% 429**；放行 P50 36→65ms、持续组 P95 24→48ms；**全局桶 10/s 精确放行核验=突发恰放 10 + 持续满秒 admit=10**；双源对账 限流开 31 OK+470 RL / 限流关 501 轮全 OK（主计划 §12 DoD 硬指标①，证据 docs/jmeter/w7d3/）
+- [x] 缓存命中提升数字落袋（D3）：冷（重启+DEL L2）344.8/s / 热稳态 **3514.9/s ≈ 10.2 倍**，P95 162ms→23ms ≈ 7 倍；隔离口径=同 JVM evict 后回源 28ms vs L1 命中 3-4ms（纯缓存贡献 ≈7 倍，冷窗余量为 JIT/池预热，S1 的 getStock 每请求实时查库口径已声明）（主计划 §12 DoD 硬指标②，证据 docs/jmeter/w7d3/）
+- [x] 交易并发压测：ramp-up 异键并发零超卖、库存精确扣减；同键 ×N 并发全返首次——T3.3 完成：异键 100 线程 200 单零超卖（库存 500→300 精确对账）+ 同键 100 并发仅 1 单全返首次（Avg=849ms 锁排队随并发线性，D2 t50=495ms 对比）
+- [x] 真 LLM 小样本延迟参照（D3 T3.4）：真 DeepSeek 16+1 请求，**首 token P50=735ms/P95=1041ms、整轮 P50=1045ms/P95=1524ms**，链路开销 <6%（totalMs−llmMs）——「链路吞吐 96.5/s（桩）≠ LLM 体感 ~1s/轮（真）」两口径分开陈述；**usage 真回传 17/17**（W6D4 预留的 stream-usage 验证收口）；README 口径段随 T5.2（主计划 §12 DoD，证据 docs/jmeter/w7d3/parse-real.txt）
+- [x] 取数双源：JMeter JTL/HTML（客户端）+ TurnMetrics 单行 JSON 日志解析脚本（服务端 outcome/llmMs/工具分布），双源口径对齐写清——T2.2/T2.3 完成：parse-turnmetrics.ps1 与 JTL 对账逐条一致（限流开 31 OK+470 RL / 关 501 轮全 OK 双源互证），w7d2-baseline.md 记录口径
 - [x] Docker Compose 一条命令拉起全部依赖（redis-stack 本地镜像 + MySQL 8 + healthcheck + .env 注入，D4 实测 redis 6s→mysql 15s healthy 就绪序）+ README 克隆三步（草稿段已入 README，T5.2 打磨）+ 加分项 app 容器化入 fullstack profile
 - [x] README「压测与部署」章节 + 架构图刷新 + 踩坑实录补条（#14-17）+ 混沌 C1-C7 回归 PASS（C3 修复后）+ 主计划 W7 ✅ 2026-10-05 + commit `W7D{n}` 校对通过
 

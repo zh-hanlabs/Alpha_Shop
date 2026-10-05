@@ -1,7 +1,7 @@
 # ShopAgent 项目主计划（Vibecoding 总纲）
 
 > 用途：本文件是项目的唯一事实来源（Single Source of Truth）。以后每次用 AI 辅助开发（vibecoding）时，把本文档 + 对应周的任务清单一起喂给 AI，即可冷启动。
-> 配套文件：`shopagent-w1w2-mvp-tasks.md`（W1-2 逐日任务）· `shopagent-w3w4-tasks.md`（W3-4 逐日任务 + 设计定稿）· `shopagent-w5-tasks.md`（W5 逐日任务 + 设计定稿）· `shopagent-w6-tasks.md`（W6 逐日任务 + 设计定稿）· `shopagent-w7-tasks.md`（W7 逐日任务 + 设计定稿）
+> 配套文件：`shopagent-w1w2-mvp-tasks.md`（W1-2 逐日任务）· `shopagent-w3w4-tasks.md`（W3-4 逐日任务 + 设计定稿）· `shopagent-w5-tasks.md`（W5 逐日任务 + 设计定稿）· `shopagent-w6-tasks.md`（W6 逐日任务 + 设计定稿）· `shopagent-w7-tasks.md`（W7 逐日任务 + 设计定稿）· `shopagent-w8-tasks.md`（W8 逐日任务 + 收官核销）
 > 创建时间：2026-10-03 · 维护规则：每完成一周，更新对应周的「状态」列
 
 ---
@@ -50,7 +50,7 @@
 ```
 shopagent/
 ├── pom.xml
-├── AGENTS.md              ← W1 Day1 建立：拷贝本文档「§8 开发约定」
+├── AGENTS.md              ← W1 Day1 建立：拷贝本文档「§9 开发约定」
 ├── README.md              ← 架构图 + 启动步骤 + 演示 GIF
 └── src/main/
     ├── java/com/shopagent/
@@ -83,7 +83,7 @@ shopagent/
 | W5 | RAG + 缓存 | 商品知识库问答 + 热点多级缓存 | ⭐⭐ | ✅ 2026-10-04 |
 | W6 | 稳定性 | LLM 限流熔断降级 + Redis 会话记忆 | ⭐⭐ | ✅ 2026-10-04 |
 | W7 | 数字 + 部署 | JMeter 压测 + Docker Compose + H2→MySQL | ⭐⭐ | ✅ 2026-10-05 |
-| W8 | 打磨 | 简历措辞 + 三层追问准备 + commit 整理 | 收口 | ⬜ |
+| W8 | 打磨 | 简历措辞 + 三层追问准备 + commit 整理 | 收口 | 🔄 |
 
 > W1-2 已有逐日清单见 `shopagent-w1w2-mvp-tasks.md`，下文从 W3 起展开。
 
@@ -184,7 +184,22 @@ Agent 调交易工具的三个风险：
 
 ---
 
-## 8. 开发约定（Vibecoding 规则，W1 拷入仓库 AGENTS.md）
+## 8. W8：打磨收官（2026-10-05 清单化）
+
+| 任务 | 说明 |
+|---|---|
+| 简历 bullets | 5 条对照 §0 映射表，数字全部可溯源到 docs/ 证据，入 `docs/resume/` |
+| 三层追问自测 | 逐 bullet 三层自测（原理→数字口径→反驳局限），弱项补进 docs/study 学习指南，不另建文档 |
+| 已知局限话术 | 四章已知局限汇总为「主动讲 + 缓解路径」标准应答并入学习指南 |
+| commit 整理 | 全量校对 `W{周}D{天}:` 格式，只校对不重写历史；v1.0 轻量标签打在 W8 最终 commit 上 |
+| README 截图收口 | 聊天页 / 混沌 / JMeter 三图入仓 `docs/screenshots/`；克隆即跑三步终验 |
+| 项目 DoD 终验 | §12 六项逐项核销；查→问→办（含退款）演示链路证据留档；W8 ✅ 后项目完结 |
+
+**砍单线**：零新功能、零代码改动（终验钓出 bug 除外=最小修复+单测+另立 commit）；不做 GIF/视频 demo、英文 README、在线部署；不改写 commit 历史。逐日任务与设计定稿见 `shopagent-w8-tasks.md`。
+
+---
+
+## 9. 开发约定（Vibecoding 规则，W1 拷入仓库 AGENTS.md）
 
 ### 给 AI 编码助手的行为规则
 
@@ -205,7 +220,7 @@ Agent 调交易工具的三个风险：
 
 ---
 
-## 9. 已定决策记录（ADR-lite，防止 AI 会话反复横跳）
+## 10. 已定决策记录（ADR-lite，防止 AI 会话反复横跳）
 
 | # | 决策 | 理由 | 替代方案（为何不选） |
 |---|---|---|---|
@@ -220,7 +235,7 @@ Agent 调交易工具的三个风险：
 
 ---
 
-## 10. 风险与砍单清单（Scope Guard）
+## 11. 风险与砍单清单（Scope Guard）
 
 | 风险 | 触发信号 | 应对 |
 |---|---|---|
@@ -233,7 +248,7 @@ Agent 调交易工具的三个风险：
 
 ---
 
-## 11. 完成定义（项目级 DoD）
+## 12. 完成定义（项目级 DoD）
 
 8 周结束时：
 - [ ] 演示链路全通：查 → 问 → 办（含退款），带幂等与锁的可视化日志
@@ -245,13 +260,13 @@ Agent 调交易工具的三个风险：
 
 ---
 
-## 12. 每周开工提示词模板（直接复制用）
+## 13. 每周开工提示词模板（直接复制用）
 
 ```
 我在开发 ShopAgent 项目（对话式电商交易 Agent，Spring AI Alibaba）。
 请先阅读项目根目录 AGENTS.md 和 PLAN 中【W{N}】章节。
 本次任务：{粘贴对应周任务表中的一条}。
-约束：遵守 §7 开发约定，不做范围外的事，完成后给出验证步骤。
+约束：遵守 §9 开发约定，不做范围外的事，完成后给出验证步骤。
 ```
 
 ---
