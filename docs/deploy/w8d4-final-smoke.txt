@@ -1,0 +1,242 @@
+W8D4 · T4.3 克隆即跑三步终验（from-zero）
+日期：2026-10-05 · 执行者：按 README 终稿「快速启动」三步从零走一遍
+
+== 隔离口径（为何不是原地 down -v）==
+为避免破坏 W7 累积证据所用的数据卷（shop_agent_mysql-data / shop_agent_redis-data 全程保留），
+本次终验用独立 compose 项目 + 全新卷模拟「克隆即跑」：docker-compose -p w8d4final --profile fullstack up -d
+宿主端口错开：MYSQL_PORT=23306、APP_PORT=28080（默认 13306/8080 被本机其他进程占用的规避，非配置改动）
+compose 文件、镜像、Dockerfile、schema、seed 均未改动（W8 零代码改动约束）。
+
+== 步骤 1：docker-compose up -d（依赖就绪序）==
+$ docker-compose version
+Docker Compose version v5.1.4
+$ docker volume ls | grep -E 'w8d4final|shop_agent'   # 全新项目卷=空库，旧卷保留未动
+local     shop_agent_mysql-data
+local     shop_agent_redis-data
+local     w8d4final_mysql-data
+local     w8d4final_redis-data
+$ docker-compose -p w8d4final --profile fullstack ps
+NAME              IMAGE                                   COMMAND                   SERVICE   CREATED         STATUS                   PORTS
+shopagent-app     shopagent/app:latest                    "java -jar app.jar"       app       3 minutes ago   Up 3 minutes             0.0.0.0:28080->8080/tcp, [::]:28080->8080/tcp
+shopagent-mysql   mysql:8.4                               "docker-entrypoint.s…"   mysql     4 minutes ago   Up 4 minutes (healthy)   0.0.0.0:23306->3306/tcp, [::]:23306->3306/tcp
+shopagent-redis   shopagent/redis-stack-server:7.4.0-v8   "/opt/redis-stack/bi…"   redis     4 minutes ago   Up 4 minutes (healthy)   0.0.0.0:6379->6379/tcp, [::]:6379->6379/tcp
+
+== 步骤 2：应用启动 + 空库自动播种 + 向量索引指纹重建 ==
+$ docker logs shopagent-app | grep -E 'Tomcat started|Started ShopAgentApplication|知识库索引'
+2026-10-05T09:41:39.994Z  INFO 1 --- [shopagent] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2026-10-05T09:41:40.002Z  INFO 1 --- [shopagent] [           main] com.shopagent.ShopAgentApplication       : Started ShopAgentApplication in 4.854 seconds (process running for 5.298)
+2026-10-05T09:41:40.031Z  INFO 1 --- [shopagent] [           main] c.shopagent.infra.rag.KnowledgeIndexer   : 知识库索引开始重建：语料 40 条（首次构建）
+2026-10-05T09:41:42.151Z  INFO 1 --- [shopagent] [           main] c.shopagent.infra.rag.KnowledgeIndexer   : 知识库索引重建完成：40 条，耗时 2120 ms
+
+$ docker exec shopagent-mysql mysql -ushopagent -pshopagent --database=shopagent -e 'show tables'
+Tables_in_shopagent
+logistics
+order_item
+orders
+product
+trade_audit_log
+
+# 全新卷 init 后种子行数（order_item=8 未翻倍 = W7D5 踩坑 #16 修复后 init 幂等 5/5 表在 MySQL 持久化卷上成立）
+product	8
+orders	6
+order_item	8
+trade_audit_log	0
+logistics	5
+
+# redis FT 索引（空库首发即建，无需手工操作）
+shopagent-knowledge
+index_name
+shopagent-knowledge
+index_options
+
+index_definition
+key_type
+JSON
+prefixes
+knowledge:
+default_score
+1
+attributes
+identifier
+$.content
+
+== 步骤 3-A 查（订单查询，纯库链路）==
+$ curl -s -X POST http://localhost:28080/api/dev/chaos/query-order -H 'Content-Type: application/json' -d '{"userId":"u1001","orderNo":"10001"}'
+{"code":0,"msg":"success","data":{"orderNo":"10001","status":"SHIPPED","totalAmount":148.90,"createdAt":"2026-10-03 15:41","items":[{"productName":"闪充移动电源 20000mAh","quantity":1,"unitPrice":129.00},{"productName":"编织快充数据线 1m","quantity":1,"unitPrice":19.90}]}}
+$ curl -s 'http://localhost:28080/api/dev/chaos/stats?userId=u1001&productId=2'   # 下单前基线
+{"productId":2,"orderCount":5,"stock":200,"userId":"u1001","productName":"编织快充数据线 1m"}
+
+== 步骤 3-B 办（下单 ×2 同幂等键：LLM 重试场景的代码级兜底）==
+$ curl -s -X POST http://localhost:28080/api/dev/chaos/place -H 'Content-Type: application/json' --data-binary @body.json   # body 两次完全一致
+{"userId":"u1001","productId":2,"quantity":1,"conversationId":"w8d4-final","message":"克隆即跑终验下单"}
+-- 第 1 次（首次执行）--
+{"code":0,"msg":"success","data":{"orderNo":"20261005094540913474","productName":"编织快充数据线 1m","quantity":1,"totalAmount":19.90,"status":"PENDING_PAYMENT"}}
+-- 第 2 次（重放：应返回首次结果，同订单号，不二次扣库存）--
+{"code":0,"msg":"success","data":{"orderNo":"20261005094540913474","productName":"编织快充数据线 1m","quantity":1,"totalAmount":19.9,"status":"PENDING_PAYMENT"}}
+$ curl -s 'http://localhost:28080/api/dev/chaos/stats?userId=u1001&productId=2'   # 期望 stock 200->199、orderCount 5->6
+{"productId":2,"orderCount":6,"stock":199,"userId":"u1001","productName":"编织快充数据线 1m"}
+$ curl -s 'http://localhost:28080/api/dev/chaos/audit?userId=u1001&limit=4'   # 两条记录同 idempotent_key，resultCode 均 0
+[{"id":2,"userId":"u1001","action":"placeOrder","orderNo":null,"idempotentKey":"64efd82c9a4207ddab73a0b08da979293d2c921001c9863c62f53b0dd6075091","resultCode":0,"resultMsg":"success","createdAt":"2026-10-05T17:45:40"},{"id":1,"userId":"u1001","action":"placeOrder","orderNo":null,"idempotentKey":"64efd82c9a4207ddab73a0b08da979293d2c921001c9863c62f53b0dd6075091","resultCode":0,"resultMsg":"success","createdAt":"2026-10-05T17:45:40"}]
+
+== 步骤 3-C 办（退款 ×2 同幂等键 + 还库存只 +1）==
+# 订单 10001（SHIPPED，明细=商品1×1 + 商品2×1）——退款键=用户+动作+订单号，跨会话可拦
+-- 前置库存 --
+{"productId":1,"orderCount":6,"stock":45,"userId":"u1001","productName":"闪充移动电源 20000mAh"}
+{"productId":2,"orderCount":6,"stock":199,"userId":"u1001","productName":"编织快充数据线 1m"}
+-- 第 1 次退款 --
+{"code":0,"msg":"success","data":{"orderNo":"10001","refundAmount":148.90,"status":"REFUNDED"}}
+-- 第 2 次退款（重放：返回首次结果，不二次还库存）--
+{"code":0,"msg":"success","data":{"orderNo":"10001","refundAmount":148.9,"status":"REFUNDED"}}
+-- 后置库存（实测商品1 45->46、商品2 199->200，两次退款只 +1）--
+{"productId":1,"orderCount":6,"stock":46,"userId":"u1001","productName":"闪充移动电源 20000mAh"}
+{"productId":2,"orderCount":6,"stock":200,"userId":"u1001","productName":"编织快充数据线 1m"}
+$ curl -s -X POST http://localhost:28080/api/dev/chaos/query-order -H 'Content-Type: application/json' -d '{"userId":"u1001","orderNo":"10001"}'   # 状态流转
+{"code":0,"msg":"success","data":{"orderNo":"10001","status":"REFUNDED","totalAmount":148.90,"createdAt":"2026-10-03 15:41","items":[{"productName":"闪充移动电源 20000mAh","quantity":1,"unitPrice":129.00},{"productName":"编织快充数据线 1m","quantity":1,"unitPrice":19.90}]}}
+$ curl -s 'http://localhost:28080/api/dev/chaos/audit?userId=u1001&limit=4'
+[{"id":4,"userId":"u1001","action":"refund","orderNo":"10001","idempotentKey":"f4e8a9f51c99b0a1072d3774739f47a6beb2b877ff4383579dc642b7cf27abec","resultCode":0,"resultMsg":"success","createdAt":"2026-10-05T17:46:02"},{"id":3,"userId":"u1001","action":"refund","orderNo":"10001","idempotentKey":"f4e8a9f51c99b0a1072d3774739f47a6beb2b877ff4383579dc642b7cf27abec","resultCode":0,"resultMsg":"success","createdAt":"2026-10-05T17:46:02"},{"id":2,"userId":"u1001","action":"placeOrder","orderNo":null,"idempotentKey":"64efd82c9a4207ddab73a0b08da979293d2c921001c9863c62f53b0dd6075091","resultCode":0,"resultMsg":"success","createdAt":"2026-10-05T17:45:40"},{"id":1,"userId":"u1001","action":"placeOrder","orderNo":null,"idempotentKey":"64efd82c9a4207ddab73a0b08da979293d2c921001c9863c62f53b0dd6075091","resultCode":0,"resultMsg":"success","createdAt":"2026-10-05T17:45:40"}]
+# 留痕：第 2 次响应 totalAmount/refundAmount 的 scale 由 148.90 变 148.9 —— 幂等结果经 Redis JSON 往返后的数值语义一致（踩坑 #5，判定按数值不按 scale）
+
+== 步骤 3-D 办（状态机拒绝层，与幂等层正交：换订单即新键，直落业务判定）==
+$ curl -s -X POST http://localhost:28080/api/dev/chaos/refund -d '{"userId":"u1001","orderNo":"10003",...}'   # 10003=PENDING_PAYMENT
+{"code":40901,"msg":"订单尚未支付，无需退款；如不想要了，我可以帮您取消订单","data":null}
+$ curl -s -X POST http://localhost:28080/api/dev/chaos/refund -d '{"userId":"u1001","orderNo":"10004",...}'   # 10004=REFUNDING
+{"code":40901,"msg":"订单已在退款流程中，请耐心等待到账，请勿重复申请","data":null}
+# 口径：退款幂等键=用户+动作+订单号（跨会话可拦同一订单的重复退款），故同订单第 N 次调用命中幂等返回首次结果；
+# 状态机拒绝出现在「新键但状态不允许」的订单上——两层各自生效，互不遮蔽。
+
+== 步骤 4 重启=冷：AOF 持久化 + 两级缓存 miss→hit（单请求探针，非压测矩阵口径）==
+$ docker restart shopagent-app   # L1（Caffeine，进程内）清空
+$ redis-cli DEL cache:product:detail:2   # L2 手动清除，构造双 miss
+1
+$ docker logs shopagent-app | grep -E 'Started|Indexer'
+2026-10-05T09:48:00.102Z  INFO 1 --- [shopagent] [           main] com.shopagent.ShopAgentApplication       : Started ShopAgentApplication in 4.821 seconds (process running for 5.386)
+2026-10-05T09:48:00.163Z  INFO 1 --- [shopagent] [           main] c.shopagent.infra.rag.KnowledgeIndexer   : 知识语料指纹未变化且索引在位，跳过重建（40 条）
+# 重启后向量索引仍在位、指纹匹配跳过重建 = W7D5 compose 显式 AOF（--appendonly yes --save 60 1）加固后行为（踩坑 #17 的根治验证）
+
+$ curl -w '%{time_starttransfer}' http://localhost:28080/api/dev/cache/product-detail?productId=2   # 第 1 次（L1+L2 双 miss）
+  实测 0.053815 s
+$ curl -w '%{time_starttransfer}' http://localhost:28080/api/dev/cache/product-detail?productId=2   # 第 2 次（L1 命中）
+  实测 0.006800 s
+$ curl -w '%{time_starttransfer}' http://localhost:28080/api/dev/cache/product-detail?productId=2   # 第 3 次（L1 命中）
+  实测 0.007191 s
+$ redis-cli EXISTS cache:product:detail:2   # 首请求回源后 L2 已写回
+1
+-- 详情响应体（stock 实时读库，不随缓存）--
+{"product":{"id":2,"name":"编织快充数据线 1m","category":"充电配件","price":19.90,"description":"60W编织线身，抗弯折，支持快充"},"hotspotCount":1,"stock":200}
+# 口径：53.8ms → 6.8/7.2ms（≈7.9 倍单请求改善）为「重启即冷」下的 miss→hit 直测，含 MySQL 主键查询 + 序列化写回，
+# 与 W7D3 隔离探针（28ms→3-4ms）同量级；批量冷热吞吐差（523.6/s→3644.3/s ≈7.0 倍）见
+# README 压测矩阵与 docs/jmeter/w7d3/w7d3-stress-matrix.md，不在本步骤口径内。
+
+
+== 步骤 5 问（知识库检索：空库自动重建后 KNN 直验）==
+# 全新 redis 卷 → 应用启动即 FT.CREATE + 分批灌入（步骤 2 的 40 条/2120ms）；此处不经 LLM 直接打索引，证明检索层可用
+$ redis-cli FT.INFO shopagent-knowledge | num_docs / hash_indexing_failures
+num_docs = 40
+hash_indexing_failures = 0
+$ redis-cli -x FT.SEARCH shopagent-knowledge '*=>[KNN 3 @embedding $vec AS score]' RETURN 3 content productId score DIALECT 2 PARAMS 2 vec < 该文档自身向量的 float32 二进制
+  # 查询向量取 knowledge:053c686270d3db6b770b 的 embedding（1024 维 text-embedding-v4，base64→base64 -d 得 4096 字节）
+3
+knowledge:053c686270d3db6b770b
+score / -1.19209289551e-07
+content / 露营灯的亮度与档位 / 三档调光：高亮、中亮、夜灯模式，单键循环切换；IPX5 防水，可悬挂设计。
+productId / 7
+knowledge:4efa4316e7078d520a4e
+score / 0.288328051567
+content / 露营灯怎么充电、能用多久？/ 内置锂电池，USB-C 接口充电。满电高亮档约续航 6 小时，节能档最长约 24 小时，一晚露营毫无压力。
+productId / 7
+knowledge:c71f94180c4965deb72d
+score / 0.228168308735
+content / 露营灯防水吗？/ IPX5 级防水：小雨可淋、泼溅无忧，不可浸泡。雨天营地、湖边夜钓都能放心用，落水后请及时擦干再充电。
+productId / 7
+# 判定：top1 为查询向量自身（score≈0），近邻全为同商品（productId 7）的露营灯问答——语义空间正确，索引维度与 DashScope v4 的 1024 维一致（FT.INFO 校验通过才允许灌入，W5D0 起）。
+
+== 步骤 6 问（对话链路无可用 Key 时的降级：克隆即用不炸）==
+# 本容器 DEEPSEEK_API_KEY 为占位串（终验时环境无真 Key，见末尾「真 Key 说明」），预期不打折地走完闸序后落到兜底话术
+$ curl -X POST http://localhost:28080/api/chat -d @chat.json   # conversationId=w8d4-chat, userId=u1001, message=订单 10001 到哪了
+当前咨询订单的朋友比较多，订单查询暂时排队中，请稍后再试～  [HTTP 200 / 0.569678s]
+$ docker logs shopagent-app | grep 401
+org.springframework.web.reactive.function.client.WebClientResponseException$Unauthorized: 401 Unauthorized from POST https://api.deepseek.com/v1/chat/completions
+$ curl -s http://localhost:28080/api/dev/resilience/breaker
+{"state":"CLOSED","failureRate":-1.0,"bufferedCalls":2,"failedCalls":2,"successfulCalls":0,"notPermittedCalls":0}
+$ curl -s http://localhost:28080/api/dev/obs/stats
+{"turns":2,"byOutcome":{"DEGRADED":2},"avgTotalMs":813,"totalPromptTokens":0,"totalCompletionTokens":0,"usageHits":0,"toolCallDistribution":{}}
+# 判定：HTTP 200 + 中文兜底话术（非 5xx、非堆栈外泄）；熔断器仍 CLOSED（failedCalls=2 未达窗口失败率阈值，
+# failureRate=-1 表示滑动窗口样本不足，不误开）；TurnMetrics 记 DEGRADED 2 轮、avgTotalMs=813、usageHits=0
+# （无真回传，与 W6D4 预留口径一致）。全程无未捕获异常、无 500，克隆后不配 Key 也能把链路走通看到降级。
+# 真 LLM 那一轮（查→问→办 三段、工具事件、订单号 20261005092103699563）见 README 图 1 与 docs/screenshots/w8d4-chat-flow.png，在原有堆栈上用真 Key 采集。
+
+== 步骤 7 Redis 键族清点（终验后可复核）==
+$ redis-cli --scan | 按前缀归并
+     41 knowledge
+      8 idempotent
+      4 {rlimit
+      2 rlimit
+      2 cache
+      1 chat
+# 期望族齐全：knowledge(40 文档+指纹)、idempotent(下单/退款标记+结果)、rlimit(全局限流桶，含 hash-tag 内部键)、cache(L2 详情)、chat(会话记忆)
+
+== 终验判定 ==
+README「快速启动」三步（克隆 → docker-compose up -d → 起应用）在**全新卷、全新项目、零改配置**下走通：
+  1) 依赖就绪序成立：redis healthy → mysql healthy → app 起来（Started in 4.854s / 重启后 4.821s）
+  2) 空库自动播种成立：5 表建成，product 8 / orders 6 / order_item 8（未翻倍）/ logistics 5 / trade_audit_log 0
+  3) 向量索引自愈成立：首次构建 40 条 2120ms；重启后指纹匹配跳过重建（AOF 在位）
+  4) 查：订单 10001 明细+状态+金额正确（148.90）
+  5) 办：下单 ×2 同幂等键 → 同订单号 20261005094540913474、库存只扣 1（200→199）、审计 2 条同键 code=0
+  6) 办（退款）：×2 同键 → 同结果、库存只 +1（45→46 / 199→200）、状态 SHIPPED→REFUNDED；
+     状态机拒绝层独立生效（10003 待付款、10004 退款中各返 40901 引导话术）
+  7) 缓存：重启=冷 53.8ms → 命中 6.8/7.2ms（单请求口径，批量吞吐口径另见压测矩阵）
+  8) 问：KNN 直验索引可用（top1 自身、近邻同商品），无 Key 时对话链路 HTTP 200 降级不炸
+结论：W8「克隆即跑」终验通过，零代码改动、零新依赖。
+
+== 真 Key 说明（须知，勿误读）==
+本次终验环境 DEEPSEEK_API_KEY 不在任何环境变量作用域内（W7D4 的真 Key 只注入过当时那台已删除的容器）。
+故步骤 6 走的是占位 Key → 401 → 熔断/兜底降级链路；真 LLM 的查→问→办一轮在原有堆栈上已采集（README 图 1，会话 web-15333aa0，
+下单落库订单号 20261005092103699563）。W8D5 若需再跑真 Key 一轮，须由使用者本人重新导出环境变量，仓库与本文档均不含任何 Key。
+
+== 复现命令（第三方照抄即可）==
+git clone <repo> && cd shop_agent
+docker-compose -p <新项目名> --profile fullstack up -d    # 需先 build：mvn -q -DskipTests package
+curl -s 'http://localhost:8080/api/dev/chaos/stats?userId=u1001&productId=2'
+curl -s -X POST http://localhost:8080/api/dev/chaos/place -H 'Content-Type: application/json' --data-binary @body.json   # 连发两次
+docker exec <redis容器> redis-cli FT.INFO shopagent-knowledge
+
+== 数据漂移声明 ==
+上述写操作只发生在临时项目 w8d4final 的全新卷上，终验后连同卷一并删除（docker-compose -p w8d4final --profile fullstack down -v）；
+W7 证据所用卷 shop_agent_mysql-data / shop_agent_redis-data 未被触碰，README 与 docs/jmeter 的数字口径不受本次终验影响。
+
+########## 附录：终验钓出部署层真 bug（redis AOF 不落卷）##########
+
+== 现象 ==
+原堆栈（默认项目 shop_agent）以 docker-compose down + up -d 重建容器后（卷保留，down 无 -v）：
+  $ redis-cli DBSIZE      → 0
+  $ redis-cli FT.INFO shopagent-knowledge → 无输出（索引不存在）
+  redis 日志："Creating AOF base file appendonly.aof.1.base.rdb on server start"（= 起来时卷是空的）
+
+== 定位 ==
+$ redis-cli CONFIG GET dir（W7D5 加固后的容器）
+dir → /var/lib/redis-stack
+$ ls -la /var/lib/redis-stack/appendonlydir   # AOF 全在容器可写层
+-rw-r--r-- 1 root root 131 appendonly.aof.1.base.rdb
+-rw-r--r-- 1 root root  93 appendonly.aof.1.incr.aof
+-rw-r--r-- 1 root root  88 appendonly.aof.manifest
+$ ls -la /data                                 # compose 声明的挂载点（卷 shop_agent_redis-data）
+total 8  —— 空的，从来没收过盘
+根因：deb 版 redis-stack-server 的默认 dir 不是 /data（官方 redis 镜像才是），命令行只加了 --appendonly/--save
+没钉 dir，于是 AOF/RDB 全写进容器可写层。W7D5 的「重启写入存活实测」用的是 docker stop/start（同一个容器、同一层），
+所以测得过——但它只证明了 stop/start 保得住，没覆盖 down/重建容器这一档。部署文档写的「AOF 持久化」当时并不成立。
+
+== 最小修复（另立 commit，W8 红线允许：终验钓出真 bug）==
+compose.yml redis.command 增加 --dir /data 两个参数，把落盘钉在挂载点上；无代码改动、无新依赖。
+
+== 修复后复验 ==
+$ docker-compose up -d --force-recreate redis
+$ redis-cli CONFIG GET dir  → /data
+$ redis-cli GET w8d4:probe-before-fix  → (nil)   # 修复前那次写入确实在重建时丢了（反证根因）
+$ ls -la /data
+drwxr-xr-x 2 root root 4096 appendonlydir   # 这次落在卷上了
+$ redis-cli SET w8d4:persist-marker clone-recreate-survives && redis-cli BGSAVE
+$ docker-compose down && docker-compose up -d     # 容器全重建，卷保留
+$ redis-cli GET w8d4:persist-marker  → clone-recreate-survives
+$ redis-cli CONFIG GET dir           → /data
+$ mysql: select count(*) from orders / order_item → 112 / 114，product 1、2 库存 43 / 199（重建前后一行不差）
+判定：AOF 现在真正跟着卷走——down/重建容器不再丢 Redis 侧写入；MySQL 侧本就正确挂卷，一并复验无回归。

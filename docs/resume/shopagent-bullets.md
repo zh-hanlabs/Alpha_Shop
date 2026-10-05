@@ -21,7 +21,7 @@ JDK 17 · Spring Boot 3.5 · Spring AI Alibaba（Graph 编排）· DeepSeek（�
 独立设计与实现的对话式电商交易 Agent（8 周分阶段迭代，commit 按 `W{周}D{天}` 成段可追溯）：模型自主决策调用 9 个工具完成订单查询、商品知识问答（RAG）与下单/退款/取消全链路，SSE 流式打字机输出，一条命令可复现（Compose 拉起依赖 + H2 内存库克隆即跑）。
 核心工作不是「接上大模型」，而是把 LLM 当成**不可靠的调用方**——它会重试、会重放、会传错参数——因此在工具层用代码写死交易闸序（锁外快查 → 分布式锁 → 幂等四态 → 审计），让正确性不依赖模型的自觉。
 稳定性上为最贵最脆的 LLM 外呼链路建了三层护盾：分布式双层令牌桶限流、LLM 熔断、规则回复降级，并配套轮级结构化观测作为压测取数源。
-所有结论以混沌测试与 JMeter 双源对账数字为准：并发 200 单零超卖、缓存冷热吞吐差 10.2 倍、限流突发拦截 96.67%。
+所有结论以混沌测试与 JMeter 双源对账数字为准：并发 200 单零超卖、缓存冷热吞吐差 ≈7.0 倍、限流突发拦截 96.67%。
 
 ## 4. 五条 bullet（简历正文 · 标准版）
 
@@ -33,7 +33,7 @@ JDK 17 · Spring Boot 3.5 · Spring AI Alibaba（Graph 编排）· DeepSeek（�
 
 4. **会话记忆分布式化（接入层无状态）**：自研 `RedisChatMemoryRepository` 实现 Spring AI `ChatMemoryRepository` 扩展点，Redis hash + 序号 field + 两态 type-tag JSON，TTL 7 天写时刷新，读写 fail-open（读失败空历史照常聊）；双实例实证跨进程记忆连续（A 实例存、B 实例取，marker_hits=2）与全局桶跨实例共享（12 用户精确 10 过 2 拒，429 分落两实例）。
 
-5. **多级缓存 + JMeter 压测（把工程能力兑换成数字）**：Caffeine L1（500/60s）+ Redis L2（30min）两级缓存只缓存展示字段、**库存永不缓存**（正确性字段实时查库），Cache Aside 先更库再双删；JMeter 5.6.3 四组脚本 + 客户端 JTL / 服务端 TurnMetrics 日志双源逐条对账，商品详情冷→热吞吐 344.8→3514.9/s（≈10.2 倍）、P95 162→23ms（≈7 倍），同 JVM 隔离探针回源 28ms vs L1 命中 3-4ms。
+5. **多级缓存 + JMeter 压测（把工程能力兑换成数字）**：Caffeine L1（500/60s）+ Redis L2（30min）两级缓存只缓存展示字段、**库存永不缓存**（正确性字段实时查库），Cache Aside 先更库再双删；JMeter 5.6.3 四组脚本 + 客户端 JTL / 服务端 TurnMetrics 日志双源逐条对账，商品详情冷→热吞吐 523.6→3644.3/s（≈7.0 倍）、P95 162→23ms（≈7.0 倍），同 JVM 隔离探针回源 28ms vs L1 命中 3-4ms。
 
 **备用条（篇幅富余或面试展开时用，跨条引用）**：真 DeepSeek 小样本 n=17 延迟参照——首 token P50=735ms、整轮 P50=1045ms，Agent 链路自身开销（totalMs − llmMs）<6%，证明瓶颈在模型生成、限流护盾打在真瓶颈之前；token usage 真回传 17/17。
 
@@ -43,7 +43,7 @@ JDK 17 · Spring Boot 3.5 · Spring AI Alibaba（Graph 编排）· DeepSeek（�
 2. 工具层统一闸序 Redisson 锁 + SETNX 幂等四态 + 审计，同键重放返回首次结果防 LLM 重试；实测 200 单并发零超卖、同键 100 并发仅 1 单。
 3. Redisson 双层令牌桶 + Resilience4j 熔断 + 规则回复降级：突发 300 请求拦截 96.67%，熔断 OPEN 短路 0.61s，降级 40ms 出话术。
 4. 自研 ChatMemoryRepository 落 Redis（hash + TTL 7 天写时刷新，fail-open），双实例跨进程记忆连续 + 全局桶跨实例共享，接入层无状态。
-5. Caffeine + Redis 两级缓存（库存不缓存）+ JMeter 四组脚本双源对账：冷热吞吐 344.8→3514.9/s ≈10.2 倍、P95 162→23ms ≈7 倍。
+5. Caffeine + Redis 两级缓存（库存不缓存）+ JMeter 四组脚本双源对账：冷热吞吐 523.6→3644.3/s ≈7.0 倍、P95 162→23ms ≈7.0 倍。
 
 ---
 
@@ -60,15 +60,15 @@ JDK 17 · Spring Boot 3.5 · Spring AI Alibaba（Graph 编排）· DeepSeek（�
 | 同键 100 并发仅 1 单（Avg=849ms） | `docs/jmeter/w7d3/s2k-t100.jtl`、`docs/jmeter/w7d3/w7d3-stress-matrix.md` | 849ms 是**锁排队代价**不是缺陷，随并发线性（t50=495ms→t100=849ms）——正确性换时延的明码标价 |
 | 异键 200 单零超卖（500→300） | `docs/jmeter/w7d3/s2u-ramp.jtl`、`docs/jmeter/w7d3/w7d3-stress-matrix.md` | 100 线程 / 10s 爬升，三方核对：客户端样本数 = 落库订单数 = 库存 delta |
 | C1 同键 ×10 仅 1 单 / C2 ×50 零超卖 / C3 退款只还一次 / C4 停机 fail-closed | `docs/chaos/C1-same-key-x10.txt`、`C2-diff-keys-x50.txt`、`C3-refund-replay-x10.txt`、`C4-redis-down.txt` | dev-only 端点绕过 LLM 直打工具层完整闸序，**换取并发场景确定性**（不是端到端聊天链路，如实声明） |
-| 限流突发拦截 96.67%（放行 10） | `docs/jmeter/report-w7d3-rlonburst/`、`docs/jmeter/w7d3/w7d3-stress-matrix.md` | 同形对照：限流关同参 300 全过 → 差值全归因于闸；全局桶 10/s 精确核验 = 突发恰放 10 + 满秒 admit=10 |
+| 限流突发拦截 96.67%（放行 10） | `docs/jmeter/w7d3/s3a-rlon-burst.jtl`、`docs/jmeter/w7d3/w7d3-stress-matrix.md`、`docs/jmeter/w7d3/parse-apprlon.txt` | 同形对照：限流关同参 300 全过 → 差值全归因于闸；全局桶 10/s 精确核验 = 突发恰放 10 + 满秒 admit=10 |
 | 双源对账（31 OK+470 RL vs 501 全 OK） | `docs/jmeter/w7d3/parse-apprlon.txt`、`parse-apprloff.txt` | 服务端 TurnMetrics 单行 JSON 逐条对上客户端 429 计数——数字可信的原因是两个独立来源互相印证 |
 | 熔断 OPEN 短路 0.61s / 状态机全链 | `docs/resilience/w6d3-circuit-smoke.txt`、`docs/resilience/c7-circuit-break-w6d5.txt` | 真实故障注入（错 base-url 打到 :9）5 连败→OPEN→短路→20s 半开→回 OPEN；0.61s 含 HTTP 层，短路本身不发起连接 |
 | 降级回复 40ms / 交易类只引导 | `src/main/java/com/shopagent/infra/resilience/RuleFallbackService.java`、README「稳定性设计」 | 4字/40ms 分片走 answer 流保打字机体感；没有 LLM 就没有二次确认链路，故降级态绝不执行交易 |
 | 记忆 marker_hits=2 / 双实例 12 用户 10 过 2 拒 | `docs/resilience/w6d2-memory-smoke.txt`、`docs/resilience/dual-instance-w6d5.txt` | hits=2 = 重启后记忆从 Redis 回来（对照 W1 内存态失忆 hits=1）；双实例同 jar 共连一 Redis，429 分落两实例证全局桶分布式 |
-| 冷 344.8/s → 热 3514.9/s（≈10.2 倍）、P95 162→23ms（≈7 倍） | `docs/jmeter/w7d3/s1-cold.jtl`、`s1-hot-sustained.jtl`、`report-w7d3-s1cold/`、`report-w7d3-s1hotsus/` | 冷=重启清 L1 + DEL 目标 L2 键（含真 dogpile，冷窗 P50=160ms）；单机 localhost 环境，不是集群数字 |
-| 回源 28ms vs L1 命中 3-4ms | `docs/jmeter/w7d3/s1-warmmiss-probe.jtl` | 同 JVM evict 探针**隔离纯缓存贡献**——冷热 10.2 倍里混着并发与连接池因素，这条是干净口径 |
+| 冷 523.6/s → 热 3644.3/s（≈7.0 倍）、P95 162→23ms（≈7.0 倍） | `docs/jmeter/w7d3/s1-cold.jtl`、`s1-hot-sustained.jtl`（HTML 报告本地生成不入库：`jmeter -g <jtl> -o report-*`）、`docs/screenshots/w8d4-jmeter-cold.png`/`-hot.png` | 冷=重启清 L1 + DEL 目标 L2 键（含真 dogpile，穿透 50 样本 P50=160ms）；吞吐口径=JMeter 报告 Total.Throughput（样本数÷首末样本跨度）；单机 localhost 环境，不是集群数字。**W8D4 重算更正**：原记 344.8→3514.9（10.2 倍）为 D3 现算值，与入仓 JTL 不符（同名 .jtl 被复跑覆盖），已按入仓证据改口 7.0 倍 |
+| 回源 28ms vs L1 命中 3-4ms | `docs/jmeter/w7d3/s1-warmmiss-probe.jtl` | 同 JVM evict 探针**隔离纯缓存贡献**——冷热 7.0 倍里混着并发与连接池因素，这条是干净口径 |
 | 桩链路 96.5/s、P95=45ms | `docs/jmeter/w7d2/w7d2-baseline.md` | 量的是工程链路（限流闸→记忆→Graph→LLM 桩→工具→persist）**不是 LLM 能力**；与真 LLM 体感 ~1s/轮两个口径分开讲 |
-| 真 DeepSeek 首 token P50=735ms、整轮 1045ms、usage 17/17、链路开销 <6% | `docs/jmeter/w7d3/parse-real.txt`（UTF-16 归档）、`docs/jmeter/report-w7d3-real/` | n=17 小样本不做统计显著性声明；链路开销 = totalMs − llmMs，正是「限流该护在哪」的判据 |
+| 真 DeepSeek 首 token P50=735ms、整轮 1045ms、usage 17/17、链路开销 <6% | `docs/jmeter/w7d3/parse-real.txt`（UTF-16 归档，需直读）、`docs/jmeter/w7d3/s3a-real.jtl` | n=17 小样本不做统计显著性声明；链路开销 = totalMs − llmMs，正是「限流该护在哪」的判据 |
 | 单测 140 中 133 绿 + 7 跳 | `mvn test`（`src/test/` 24 个测试类） | 7 跳=需外部依赖的条件用例；infra/ 与 service/ 必有单测，tools/ 走冒烟清单（AGENTS.md 规则 6） |
 
 ## 7. 终审清单（T1.3 用户视角检验，脱稿复述讲不出即降级）
@@ -77,8 +77,8 @@ JDK 17 · Spring Boot 3.5 · Spring AI Alibaba（Graph 编排）· DeepSeek（�
 - [ ] bullet 2（幂等 + 锁）：能答「为什么返回首次结果而不是报错」「只上锁不幂等会怎样」
 - [ ] bullet 3（限流熔断降级）：能答「令牌桶参数怎么定」「为什么熔断进程内而限流分布式」
 - [ ] bullet 4（记忆分布式化）：能答「为什么 InMemory 不够」「Redis hash 为什么带序号 field」
-- [ ] bullet 5（缓存 + 压测）：能答「为什么库存不进缓存」「10.2 倍这个数怎么取的、口径陷阱在哪」
-- [ ] 抽查 3 个数字（建议：96.67%、3514.9/s、849ms）当场打开证据文件对上
+- [ ] bullet 5（缓存 + 压测）：能答「为什么库存不进缓存」「7.0 倍这个数怎么取的、口径陷阱在哪（为什么不是当初记的 10.2 倍）」
+- [ ] 抽查 3 个数字（建议：96.67%、3644.3/s、849.7ms）当场打开证据文件对上
 - [ ] 每条 bullet 的「口径陷阱」能**主动**说出来，不等面试官追问
 
 ---

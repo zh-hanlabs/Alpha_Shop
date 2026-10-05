@@ -92,6 +92,12 @@ curl -X POST -H "Content-Type: application/json" `
   http://localhost:8080/api/chat
 ```
 
+起完应用打开聊天页，一条会话走完「查→问→办」：**查**订单 10001 物流（走缓存 + 工具层实时查库）、**问**露营灯防水（走 RAG 知识库检索）、**办**下单（先二次确认再落单，底部 🔍 是每次工具调用的可视化）。
+
+![聊天页全流程：查→问→办](docs/screenshots/w8d4-chat-flow.png)
+
+> 图 1 · 聊天页全流程（真 DeepSeek + MySQL，会话 `web-15333aa0`，订单号 `20261005092103699563` 为实时下单结果）。首句英文（"I'll check the logistics…"）是模型在发起工具调用**之前**先吐出的过渡语，随 token 流一并落到前端——见「稳定性设计 · 已知局限与改进方向」第 7 条，W8 未改代码故如实保留。
+
 ### W7 · Docker Compose 一键部署（MySQL 8 + Redis Stack，替换上面对照表的 2/3 步）
 
 > 克隆三步：①一次性构建 redis-stack 本地镜像（deb 下载同上，SHA256 校验）②`docker-compose up -d` 拉起全部依赖并等 healthcheck ③起应用。交易数据落 MySQL 8（`dev,mysql` 双 profile，ADR D8），知识库向量索引随首次启动按指纹幂等重建（W5 机制，需 `AI_DASHSCOPE_API_KEY`）。
@@ -205,7 +211,7 @@ flowchart TD
 
 ### 混沌测试（C1-C4 全 PASS，脚本与证据存 `docs/chaos/`）
 
-dev-only 直连端点（`@Profile("dev")`）绕过 LLM 直打工具层完整闸序，保证并发场景确定性；数字为同一起始态（库存 60 / 订单 5）完整跑批结果：
+dev-only 直连端点（`@Profile("dev")`）绕过 LLM 直打工具层完整闸序，保证并发场景确定性；下表数字为 W4 原始跑批的同一起始态（H2 种子库：库存 60 / 订单 5）。W7D5 切 MySQL 持久库后 C1-C7 全量回归同样 PASS，起始态随命名卷累积而不同（下图 C1 即 MySQL 库上的复跑：库存 100 / 订单 56 → 库存 99 / 订单 57），**判定逻辑与结论与库无关**。
 
 | 场景 | 攻击方式 | 结果 |
 |---|---|---|
@@ -213,6 +219,10 @@ dev-only 直连端点（`@Profile("dev")`）绕过 LLM 直打工具层完整闸�
 | C2 异键并发 ×50 | 同会话不同消息（正常复购语义） | **50 单全部落库**、50 个唯一订单号连号（锁内串行可见），库存 60→9 **零超卖** |
 | C3 退款重放 ×10 并发 | 同订单同时发起退款 | 全部返回首次退款结果 ¥59，状态只迁移一次 REFUNDED，库存只还一次 |
 | C4 Redis 停机 | `docker stop` 期间交易 + 查询 | 交易 fail-closed「交易暂不可用」；查询链路（纯 H2）不受影响；Redis 恢复后交易自愈 |
+
+![混沌 C1 同幂等键 ×10 并发：10 条审计 1 张订单](docs/screenshots/w8d4-chaos-c1.png)
+
+> 图 2 · 混沌 C1（证据文件 `docs/chaos/C1-same-key-x10.txt`，UTF-16 归档需直读）。上半段是 `c1-same-key.ps1` 输出：10 路并发同键 → 10 个 `code=0` 且**同一订单号**、`uniqueOrderNos=1 newOrders=1 stockDelta=1`；下半段是当时那一批的审计表实况（`GET /api/dev/chaos/audit?userId=u1001`）——10 条记录共用一个 `idempotent_key`（`60d88fb9…`），而 `select count(*) from orders where order_no='20261005074838562228'` = 1。**「重放返回首次结果而非报错」在这张图里是可数的**：到达闸序 10 次、真正执行 1 次。
 
 再加一层 LLM 实测（W3D4）：10 路并发同句走完整 LLM 链路——InMemory 记忆竞态使 4/10 请求拿错商品 id，工具层 notFound 确定性存果、模型自查后重新搜索再确认，**无一错单**。LLM 层的混乱被工具层闸序完全兜住——「安全边界必须在代码不在 Prompt」的又一次实证。
 
@@ -345,8 +355,9 @@ CLOSED --5 连败(5/5=100%≥50%, min5 满)--> OPEN --短路(瞬时, notPermitte
 2. **熔断器进程内**：多实例各自探测各自降级（设计取舍），极端情况下实例间降级状态短暂不一致。
 3. **观测非全链路 trace**：轮级指标为止，不上 Micrometer/Prometheus/Grafana（砍单线）；跨段（限流轮/图内轮）靠跨层记账拼齐。
 4. **降级无查询直答**：纯话术不做工具兜底（已裁定），查询类问题降级期只能引导稍后再试。
-5. **token usage 口径**：`stream-usage` 已开、graph 逐 chunk 捕获，桩环境拿不到 → `promptTokens/completionTokens=null`（N/A）+ `answerChars` 字符数代理（`usageHits` 覆盖率可视化）；真 DeepSeek 是否回传待真 Key 环境复测。
+5. **token usage 口径**：`stream-usage` 已开、graph 逐 chunk 捕获；桩环境拿不到 → `promptTokens/completionTokens=null`（N/A）+ `answerChars` 字符数代理（`usageHits` 覆盖率可视化）；**真 DeepSeek 已复测收口（W7D3）：17/17 全部回传**，promptTokens≈2494/轮（系统提示+记忆窗口）、completionTokens≈82/轮（见 `docs/jmeter/w7d3/parse-real.txt`）。
 6. **降级话术意图分类是关键词规则**：不做 NLU，复杂表述可能落兜底（安全红线类交易关键词覆盖优先，宁可错杀）。
+7. **工具调用前的模型过渡语会混进正文流**：DeepSeek 在发起 tool call 之前先吐一句英文过渡语（"I'll check the logistics for order 10001."），SSE 把它当普通 token 一并推给前端，于是中文回答开头夹一句英文（README 图 1 即原样保留，未美化）。缓解=提示词约束「不输出思考过程/过渡语」+ 前端按需过滤；根治要区分「面向用户的 token 流」与「工具决策前的草稿流」，属 W8 零代码改动红线外的体验项，未动。功能与安全性不受影响——闸序在工具层，过渡语进不了交易参数。
 
 ## 压测与部署（W7 实录）
 
@@ -356,13 +367,28 @@ CLOSED --5 连败(5/5=100%≥50%, min5 满)--> OPEN --短路(瞬时, notPermitte
 
 | 场景 | 形态 | 结果 |
 |---|---|---|
-| **缓存冷/热（硬指标②）** | 冷=重启清 L1+DEL 目标 L2 键；热=预热 | 冷 344.8/s（冷窗穿透 P50=160ms，真 dogpile）→ 热稳态 **3514.9/s ≈ 10.2 倍**；P95 162ms→23ms ≈ 7 倍；同 JVM evict 探针隔离纯缓存贡献：回源 28ms vs L1 命中 3-4ms |
+| **缓存冷/热（硬指标②）** | 冷=重启清 L1+DEL 目标 L2 键；热=预热 | 冷 523.6/s（穿透 50 样本 P50=160ms，真 dogpile）→ 热稳态 **3644.3/s ≈ 7.0 倍**；P95 162ms→23ms ≈ 7.0 倍；同形状冷热比 1351.4/523.6≈2.6 倍（更保守的一档）；同 JVM evict 探针隔离纯缓存贡献：回源 28ms vs L1 命中 3-4ms |
 | **限流关/开（硬指标①）** | 同形突发 300 请求（10 线程） | 限流关 300 全过 vs 限流开**放行 10、429 拒绝率 96.67%**；全局桶 10/s 精确核验=突发恰放 10 + 持续满秒 admit=10；双源对账 限流开 31 OK+470 RL / 限流关 501 轮全 OK |
-| 交易异键 ramp-up | 100 线程 / 10s 爬升 / 200 单 | 0% 错误，库存 500→300 **精确对账零超卖** |
-| 交易同键 ×100 并发 | 全新幂等键 100 路重放 | 全返首次、仅 1 单落库（Avg=849ms=锁排队代价，随并发线性：t50=495ms→t100=849ms） |
+| 交易异键 ramp-up | 100 线程 / 10s 爬升 / 200 单 | 0% 错误，Avg=41.9ms / 20.4/s，库存 500→300 **精确对账零超卖** |
+| 交易同键 ×100 并发 | 全新幂等键 100 路重放 | 全返首次、仅 1 单落库（Avg=849.7ms / P95=1469ms=锁排队代价，随并发线性：t50=495ms→t100=849ms） |
 | 聊天链路吞吐（桩 LLM） | 50 线程 ×2 环 | 96.5/s，P50=20ms / P95=45ms，0% 错误 |
 | SSE 流式（PS5 兜底，插件无 POST body 能力） | 10 用户 ×3 请求 | 30/30 done 收尾、ttfb P50=14ms |
 | **真 LLM 小样本** | 真 DeepSeek 16+1 请求 | 首 token P50=**735ms**/P95=1041ms；整轮 P50=**1045ms**/P95=1524ms；usage 真回传 17/17；链路开销（totalMs−llmMs）<6% |
+
+> **吞吐口径（W8D4 复核定稿）**：本表吞吐一律取 JMeter HTML 报告 `Total.Throughput` = 样本数 ÷（末样本结束 − 首样本开始），任何人可用入仓 JTL 复现：`jmeter -g docs/jmeter/w7d3/s1-cold.jtl -o <out>`。冷热比原记 10.2 倍（344.8→3514.9），W8 文档收口时按入仓证据重算为 **7.0 倍**——差异来自同名 .jtl 被后续复跑覆盖、早期 JTL 未留存，属证据漂移，发现即改（详见 `docs/jmeter/w7d3/w7d3-stress-matrix.md` T3.1 更正说明）。**面试口径统一用 7.0 倍**，并主动讲这段改数过程。
+
+<table>
+<tr>
+<td width="50%"><img src="docs/screenshots/w8d4-jmeter-cold.png" alt="JMeter 报告页 · 冷组 s1-cold.jtl"></td>
+<td width="50%"><img src="docs/screenshots/w8d4-jmeter-hot.png" alt="JMeter 报告页 · 热稳态 s1-hot-sustained.jtl"></td>
+</tr>
+<tr>
+<td align="center">冷组 <code>s1-cold.jtl</code>：100 样本 / 0 错误 / Avg 87.89ms / P95 162ms / <b>523.56/s</b></td>
+<td align="center">热稳态 <code>s1-hot-sustained.jtl</code>：10000 样本 / 0 错误 / Avg 13.27ms / P95 23ms / <b>3644.31/s</b></td>
+</tr>
+</table>
+
+> 图 3 · 同一支脚本（`s1-cache-detail.jmx`，GET 商品详情）冷热两态的 JMeter 报告页，右侧 `Transactions/s` 列即上表 523.6 → 3644.3 的来源；报告页顶部 `Source file` 就是仓内 JTL 文件名，图与证据一一对应。冷组均值 87.89ms 是「一半穿透一半命中」的混合结果（穿透 50 样本 P50=160ms、尾段命中 50 样本 P50=16ms），所以 P50 仍落在 159ms——这也是为什么单看均值会低估缓存收益。
 
 ### 取数口径声明（面试必讲）
 
@@ -411,7 +437,8 @@ W5D0 起聊天与 embedding 分路由（`spring.ai.model.*` 路由键，双 star
 15. **JMeter 遇已存在 JTL 拒绝启动（W7D2）**：`-l` 文件存在时报错退出，连 "Starting standalone test" 都不打印——输出被 grep 过滤后表现为「静默无 summary」。跑批前删 JTL 与报告目录。同场加映：JTL 是带引号多行字段的 CSV（断言失败消息含换行），`wc -l` 推样本数会假溢出，按 CSV 解析。
 16. **持久化库 init 重跑 × 缺唯一约束 = 种子数据翻倍（W7D5，本周期最重要的坑）**：`order_item` 只有自增主键，无 (order_no, product_id) 唯一键——H2 内存库每次启动都是全新库永远踩不到；MySQL 持久化卷上应用重启两次 init 后种子明细翻倍（16 行），`continue-on-error` 只兜得住有唯一键的表，C3 退款回归「还库存 ×2」就此钓出。幂等/锁/状态机全部无辜（审计 10 条同键 code=0、条件迁移只中一次），是**测试夹具被污染**。修复：双平台 schema 补 `uk_order_item_order_product` + 存量去重 + ALTER——init 幂等从 4/5 表补齐 5/5 表。教训：`CREATE TABLE IF NOT EXISTS` + `continue-on-error` 的「幂等」只覆盖有唯一键的写入；换持久化库必须重审所有 seed 的唯一性。
 17. **redis-stack-server 停机不落 RDB（W7D5）**：deb 版 `redis-stack-server` 不透传 SIGTERM 落盘（redis 日志证实最后一次 BGSAVE 与 stop 间隔 17 分钟且 stop 时无 save），`docker stop/start` 后自上次周期 BGSAVE 起的写入全丢——C5 矩阵 E「恢复后知识事实回归」失败（索引蒸发），幂等标记/会话记忆同窗受损。修复：compose 显式 `--appendonly yes --save 60 1` + 重启写入存活实测；知识索引按设计由应用重启指纹重建兜底（与 W5D5 踩坑 #9 一脉相承，本次补上部署层根治）。
+18. **证据漂移：同名 JTL 被复跑覆盖，文档数字与入仓证据脱钩（W8D4 收口时钓出）**：压测跑批固定写 `s1-cold.jtl` / `s1-hot-shape.jtl`，复跑即原地覆盖，而矩阵文档里的吞吐是**当时那一版 JTL** 现算的——W8 逐条核对时发现 344.8/529.1/3514.9 三个吞吐与入仓 JTL 重算值（523.6/1351.4/3644.3）全部不符，冷组 P50 一格还误填了尾段命中样本的 P95（22ms），且 `report-w7d3-*` 是 gitignore 的本地目录（简历里当作证据路径等于死链）。修复：吞吐口径统一改成「JMeter 报告 `Total.Throughput`=样本数÷首末样本跨度，可用入仓 JTL 一键复现」，硬指标②由 10.2 倍**下调为 7.0 倍**（与同 JVM evict 探针的纯缓存 ≈7 倍互相印证），README/简历/学习指南/矩阵四处同步。教训：**证据要能被第三方从仓内文件复算**，否则数字再漂亮也只是当时的一句陈述；跑批输出应带时间戳或只增不改（`-l run-<date>.jtl`），文档只引用被冻结的那一份。
 
 ## 当前进度
 
-**W7 收官（数字 + 部署）**：JMeter 四组脚本（S1 缓存 / S2 交易异键+同键 / S3a 聊天桩 / S3b SSE）+ TurnMetrics 日志解析双源取数；**DoD 两项硬指标落袋**——缓存冷热 344.8/s→3514.9/s ≈10.2 倍（P95 162→23ms）、限流关/开同形突发 300 全过 vs 放行 10（96.67% 429、全局桶 10/s 精确核验）；交易 ramp-up 200 单零超卖库存精确对账 + 同键 100 并发仅 1 单；真 DeepSeek 小样本（首 token P50=735ms、整轮 P50=1045ms、usage 真回传 17/17、链路开销 <6%）；**Docker Compose 一键部署**（redis-stack 本地镜像禁 pull + MySQL 8.4 healthcheck 就绪序 + app 容器化加分项 `--profile fullstack`）+ 克隆体验验证（空库 init 自动播种 + 向量索引指纹重建）；H2→MySQL 双 profile（dev 默认 H2 clone 即跑零动，压测/部署走 `dev,mysql`）；混沌 C1-C7 最终构建回归全 PASS（C3 首跑钓出 order_item init 幂等缺口并修复，C5 钓出 redis 停机不落盘并以 AOF 加固）+ 单测 140/133 绿。README「压测与部署」章节 + 架构图（MySQL/Compose/JMeter 边界）+ 踩坑 #14-17 刷新到位。W1-W6（MVP/交易安全/RAG+缓存/稳定性）此前完成。剩 W8 打磨：简历措辞 + commit 整理。路线图见 `shopagent-master-plan.md`，W7 任务清单见 `shopagent-w7-tasks.md`。
+**W7 收官（数字 + 部署）**：JMeter 四组脚本（S1 缓存 / S2 交易异键+同键 / S3a 聊天桩 / S3b SSE）+ TurnMetrics 日志解析双源取数；**DoD 两项硬指标落袋**——缓存冷热 523.6/s→3644.3/s ≈7.0 倍（P95 162→23ms，吞吐口径见「压测矩阵数字」下方注记）、限流关/开同形突发 300 全过 vs 放行 10（96.67% 429、全局桶 10/s 精确核验）；交易 ramp-up 200 单零超卖库存精确对账 + 同键 100 并发仅 1 单；真 DeepSeek 小样本（首 token P50=735ms、整轮 P50=1045ms、usage 真回传 17/17、链路开销 <6%）；**Docker Compose 一键部署**（redis-stack 本地镜像禁 pull + MySQL 8.4 healthcheck 就绪序 + app 容器化加分项 `--profile fullstack`）+ 克隆体验验证（空库 init 自动播种 + 向量索引指纹重建）；H2→MySQL 双 profile（dev 默认 H2 clone 即跑零动，压测/部署走 `dev,mysql`）；混沌 C1-C7 最终构建回归全 PASS（C3 首跑钓出 order_item init 幂等缺口并修复，C5 钓出 redis 停机不落盘并以 AOF 加固）+ 单测 140/133 绿。README「压测与部署」章节 + 架构图（MySQL/Compose/JMeter 边界）+ 踩坑 #14-17 刷新到位。W1-W6（MVP/交易安全/RAG+缓存/稳定性）此前完成。剩 W8 打磨：简历措辞 + commit 整理。路线图见 `shopagent-master-plan.md`，W7 任务清单见 `shopagent-w7-tasks.md`。

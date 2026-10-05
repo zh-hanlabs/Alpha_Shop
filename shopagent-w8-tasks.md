@@ -19,8 +19,8 @@
 - [x] 三层追问自测 5/5：逐 bullet 三层各产出「一问一答」存档（素材=README 五章追问预演 + docs/study 学习指南），弱项已补进学习指南 —— 存档 15 问答落学习指南 §11 末；**「答不顺」的最终判定权在本人脱稿复述**（与 T1.3 同一道闸），复述讲不出的行标 ✗ 后回补
 - [x] 已知局限标准应答：README 四章已知局限（W4/W5/W6/W7）汇总成「主动讲 + 缓解路径」三段式话术并入学习指南 —— §12 新增 20 行应答表（四章条目全覆盖 + W7 两个已根治项转正），三档四标签：已补上（已根治 3 + 已收口 1）／有取舍 7／没做 9，配开场与收尾模板句
 - [ ] commit 收口：全量校对零违规（W8D0 扫描基线 66/66 已过）+ 按周分段档案 + `v1.0` 轻量标签推送远端（指向 W8 最终 commit）—— 校对与分段档案已完（D3 复核 70/70 零违规 + 抽样 14/14 标题相符 + bullets 附二），**标签与推送是 D5 收官动作**（当前 `git tag -l` 与远端标签均为空，已核）
-- [ ] README 三张关键截图入仓 `docs/screenshots/`：聊天页全流程 / 混沌 C1 / JMeter 对比，相对路径引用 + 全文终稿校对（错别字/死链/编号/数字与证据一致性）
-- [ ] 克隆即跑终验：按终稿 README 文本从零走三步 + 查问办一轮全通（W7D4 已验过 compose 链路，本次以终稿文档为准复验）
+- [x] README 三张关键截图入仓 `docs/screenshots/`：聊天页全流程 / 混沌 C1 / JMeter 对比，相对路径引用 + 全文终稿校对（错别字/死链/编号/数字与证据一致性）—— D4 完成：四张 PNG 入仓（`w8d4-chat-flow.png` 图 1 / `w8d4-chaos-c1.png` 图 2 / `w8d4-jmeter-cold.png`+`-hot.png` 图 3 双联）+ README 三处嵌入；校对顺带钓出证据漂移并全仓改口 7.0 倍（矩阵/简历/学习指南/W7 清单/README 五处同步，踩坑 #18），引用路径存在性脚本全查零 MISSING
+- [x] 克隆即跑终验：按终稿 README 文本从零走三步 + 查问办一轮全通（W7D4 已验过 compose 链路，本次以终稿文档为准复验）—— D4 完成：独立 compose 项目 + 全新命名卷（不碰 W7 证据卷）从零走通 8 项判定，证据 `docs/deploy/w8d4-final-smoke.txt`；**钓出真 bug 一个**：deb 版 redis-stack-server 默认 `dir=/var/lib/redis-stack` 不在挂载点 `/data`，W7D5 的 AOF 加固只挡得住 stop/start、down/重建容器仍全丢 → 最小修复 `--dir /data` 另立 commit（README 踩坑 #19）
 - [ ] 主计划 §12 六项项目 DoD 逐项核销 + §3 W8 状态 ✅ —— 八周收官
 
 ---
@@ -61,7 +61,7 @@
 | 2 | 幂等 + 分布式锁防重复扣款 | 同键 100 并发仅 1 单全返首次 / 异键 100 线程 200 单零超卖（库存 500→300 精确对账）/ Redis 停机 fail-closed 自愈 / 审计双出口埋点 | docs/chaos/、docs/jmeter/w7d3/、README「交易安全设计」 |
 | 3 | LLM 限流熔断降级 | 突发 300 请求精确拦截 96.67%（10 放行）/ 全局桶 10/s 精确放行核验 / 熔断 OPEN 短路 0.61s 不发起调用 / 降级=规则回复 40ms 不裸报错 | docs/resilience/、docs/jmeter/w7d3/、README「稳定性设计」 |
 | 4 | 会话记忆分布式化 | 自研 ChatMemoryRepository（Redis hash + TTL 7 天写时刷新）/ 重启记忆连续 marker_hits=2 / 双实例 A 存 B 取跨进程实证 / 接入层无状态 | docs/resilience/dual-instance-w6d5.txt |
-| 5 | 多级缓存 + 压测 | 冷/热 QPS 344.8→3514.9/s ≈10.2 倍 / P95 162→23ms ≈7 倍 / 回源 28ms vs L1 命中 3-4ms 隔离口径 / 展示字段进缓存、库存实时查库 | docs/jmeter/w7d3/、README「压测与部署」 |
+| 5 | 多级缓存 + 压测 | 冷/热 QPS 523.6→3644.3/s ≈7.0 倍 / P95 162→23ms ≈7.0 倍 / 回源 28ms vs L1 命中 3-4ms 隔离口径 / 展示字段进缓存、库存实时查库（**W8D4 证据重算更正：原记 344.8→3514.9≈10.2 倍与入仓 JTL 不符，见踩坑 #18**） | docs/jmeter/w7d3/、README「压测与部署」 |
 | 备 | 链路开销（跨条引用） | 桩链路吞吐 96.5/s vs 真 DeepSeek 首 token P50=735ms、整轮 P50=1045ms / 链路开销 <6% / usage 回传 17/17 | docs/jmeter/w7d3/parse-real.txt |
 
 ---
@@ -106,10 +106,13 @@
 
 ### D4：README 截图与终稿校对
 
-- [ ] T4.1 截图三件（§2.3）：①聊天页全流程 ②混沌 C1 ③JMeter 对比——`docs/screenshots/w8d4-*.png`；起容器 + 应用现跑环境，浏览器驱动或手工截取
-- [ ] T4.2 README 嵌图 + 终稿校对：快速启动处嵌聊天页图、混沌章节嵌 C1 图、压测章节嵌 JMeter 图；全文一遍——错别字 / 死链 / 章节编号（顺移后无旧编号残留）/ 数字与 docs/ 证据一致性
-- [ ] T4.3 克隆即跑三步终验：按终稿 README 从零走（compose up -d → healthcheck 就绪 → app `dev,mysql` 起 → 查问办一轮）；证据 `docs/deploy/w8d4-final-smoke.txt`
-- [ ] T4.4 commit
+- [x] T4.1 截图三件（§2.3）：①聊天页全流程 ②混沌 C1 ③JMeter 对比——`docs/screenshots/w8d4-*.png`；起容器 + 应用现跑环境，浏览器驱动或手工截取
+  - ①真 DeepSeek 会话 `web-15333aa0` 全屏捕获（`.app{height:100vh}` + `main{overflow-y:auto}` 导致首拍只出视口，脚本临时改 height/overflow 后 fullPage 成功再还原）；②按 §2.3 授权的回退口径重渲染入仓证据（不重跑 `c1-same-key.ps1`——它会覆写 W7 权威证据文件并 FLUSHDB），并补两段真实现场：audit 端点 10 条同键 + `count(*) from orders where order_no='20261005074838562228'`=1；③JMeter 报告页冷/热各一张（`document.body.style.zoom=0.62` 才容得下 Transactions/s 列），Source file 即仓内 JTL 名
+- [x] T4.2 README 嵌图 + 终稿校对：快速启动处嵌聊天页图、混沌章节嵌 C1 图、压测章节嵌 JMeter 图；全文一遍——错别字 / 死链 / 章节编号（顺移后无旧编号残留）/ 数字与 docs/ 证据一致性
+  - 三处嵌图 + 图注到位；引用路径存在性脚本全查（README+resume+study+w8 清单+主计划的 `docs/**` 路径）**零 MISSING**；`report-*` 残留全部标注为 gitignore 本地生成；「稳定性设计 · 已知局限与改进方向」新增第 7 条（工具调用前过渡语混进正文流，图 1 原样保留）并被图注正确指向；已知局限第 5 条 usage 口径改为 W7D3 已收口 17/17；**数字一致性核出并改口**：吞吐统一 7.0 倍口径（README/矩阵/简历/学习指南/W7 清单五处），新增踩坑 #18 记录改数过程
+- [x] T4.3 克隆即跑三步终验：按终稿 README 从零走（compose up -d → healthcheck 就绪 → app `dev,mysql` 起 → 查问办一轮）；证据 `docs/deploy/w8d4-final-smoke.txt`
+  - 独立项目 `w8d4final` + 全新卷（`MYSQL_PORT=23306`/`APP_PORT=28080` 避让，原 `shop_agent_*` 卷未动）：启动 4.854s、空库播种 5 表（order_item 8 行未翻倍）、索引 40 条/2120ms 首建 + 重启指纹匹配跳过重建、查（10001 明细）→ 办（下单 ×2 同键=同订单号且库存只扣 1；退款 ×2 同键=同结果且库存只 +1；10003/10004 状态机拒绝 40901）→ 问（KNN 直验 top1 自身/近邻同商品）→ 缓存（重启=冷 53.8ms→命中 6.8ms）→ 降级（无可用 Key 时 HTTP 200 兜底话术、熔断 CLOSED）；**钓出部署层真 bug：redis AOF 落容器层不落卷**（详见 硬性指标 与踩坑 #19）；真 LLM 那一轮沿用原堆栈已采集的图 1，本步骤如实标注
+- [x] T4.4 commit —— `W8D4:` 文档收口一笔 + 终验钓出缺陷的最小修复一笔（§三 W8 红线允许：真 bug + 最小修复 + 另立 commit）
 
 ### D5：DoD 终验 + 收官
 
