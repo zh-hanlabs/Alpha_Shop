@@ -31,7 +31,7 @@
             <collectionProp name="Arguments.arguments">
               <elementProp name="" elementType="HTTPArgument">
                 <boolProp name="HTTPArgument.always_encode">false</boolProp>
-                <stringProp name="Argument.value">{&quot;conversationId&quot;:&quot;lc-${__counter(FALSE,C)}&quot;,&quot;message&quot;:&quot;hello-stub&quot;,&quot;userId&quot;:&quot;ul-${__counter(FALSE,CU)}&quot;}</stringProp>
+                <stringProp name="Argument.value">{&quot;conversationId&quot;:&quot;lc-${__counter(FALSE,C)}&quot;,&quot;message&quot;:&quot;${__P(msg,hello-stub)}&quot;,&quot;userId&quot;:&quot;ul-${__counter(FALSE,CU)}&quot;}</stringProp>
                 <stringProp name="Argument.metadata">=</stringProp>
               </elementProp>
             </collectionProp>

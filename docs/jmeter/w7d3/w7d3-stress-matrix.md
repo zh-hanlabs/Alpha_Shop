@@ -1,4 +1,4 @@
-# W7D3 · 压测矩阵 + 数字落袋证据（T3.1-T3.3，T3.4 阻塞待密钥）
+# W7D3 · 压测矩阵 + 数字落袋证据（T3.1-T3.4 全部完成）
 
 > 日期：2026-10-05 · 环境：应用 `dev,mysql` @8080（默认限流=限流开实例；`--resilience.rate-limit.*=1000000` 覆盖=限流关实例）· 桩 LLM @18081 · MySQL 8.4.11 @13306 · redis-stack @6379 · JMeter 5.6.3 CLI · JDK 21
 > 脚本沿用 D2：`s1-cache-detail.jmx` / `s2-trade-unique.jmx` / `s2-trade-samekey.jmx` / `s3a-chat-block.jmx`。**S3a body D3 起改为全请求唯一 userId/conversationId**（用户桶不绑定，全局桶单独受控；W6 用户桶 2/s 行为由 W6D1 burst 与 D2 sanity 覆盖）。
@@ -37,19 +37,21 @@
 - **同键 ×N 并发**：100 线程同幂等键（jsame3/jsame3-conv，全新键），0% 错误，**orderCount=1、库存 300→299 仅扣 1**——幂等 under load。Avg=849ms（100 并发在用户锁上串行排队，排队时延随并发线性增长：D2 t50=495ms → D3 t100=849ms，正确性零妥协的代价曲线）。
 - audit 抽查：jload501 单条记录 resultCode=0。
 
-## T3.4 真 LLM 小样本 ⏸ 阻塞待密钥
+## T3.4 真 LLM 小样本 ✅（真 DeepSeek 10-20 请求）
 
-`DEEPSEEK_API_KEY` 会话内、Windows User/Machine 级环境变量均未设置（AGENTS.md 规则 4：密钥只走环境变量，不入仓不入对话）。runbook 已备好，密钥到位后 ~10 分钟可出数：
+用户在会话提供 Key（按 AGENTS.md 规则 4 仅经进程环境变量注入，未入仓未落盘未入证据）；应用不带 `DEEPSEEK_BASE_URL` 覆盖走真 `https://api.deepseek.com`。
 
-```
-# 1. 起应用（不带 DEEPSEEK_BASE_URL 覆盖，走真 https://api.deepseek.com；密钥走环境变量）
-DEEPSEEK_API_KEY=<真实Key> MYSQL_PORT=13306 java -jar target/shopagent-0.0.1-SNAPSHOT.jar \
-  --spring.profiles.active=dev,mysql --logging.file.name=logs/jm-w7d3-real.log
-# 2. JMeter 小样本（真 LLM 延迟秒级，无需限流参数调整；全局桶 10/s 对 10-20 请求无压力）
-jmeter.bat -n -t docs/jmeter/s3a-chat-block.jmx -Jthreads=2 -Jloops=8 -Jrampup=10 \
-  -l docs/jmeter/w7d3/s3a-real.jtl -e -o docs/jmeter/report-w7d3-real
-# 3. 取数：parse-turnmetrics.ps1 → firstTokenMs/totalMs P50/P95 + usageHits（stream-usage 真回传验证）
-```
+| 指标（服务端 TurnMetrics，n=17 含探针） | P50 | P95 | max |
+|---|---|---|---|
+| **首 token（firstTokenMs）** | **735ms** | **1041ms** | 1041ms |
+| **整轮（totalMs）** | **1045ms** | **1524ms** | 1524ms |
+| LLM 段（llmMs） | 1032ms | 1461ms | 1461ms |
+| 客户端 elapsed（JMeter JTL，n=16） | 995ms | 1341ms | 1353ms |
+
+- **usage 真回传验证成功：usageHits=17/17**（stream-usage/include_usage 生效），promptTokens=42437（≈2494/轮=系统提示+记忆窗口）、completionTokens=1388（≈82/轮，短问短答）。
+- **两个口径分开陈述（DoD 原文）**：桩链路吞吐 96.5/s（工程链路能力）≠ 真 LLM 体感 ~1s/轮（生成能力）；链路自身开销 = totalMs−llmMs ≈ 13-63ms，占比 <6%——瓶颈在 LLM 生成，Agent 框架（限流闸→记忆→Graph→persist）开销可忽略，这正是「护盾」限流打在真正瓶颈前的意义。
+- 0% 错误；全局桶 10/s 对 ~0.4/s 的真实 offered 无约束（限流语义与真 LLM 延迟正交）。
+- 复现 runbook（Key 只走环境变量）：`DEEPSEEK_API_KEY=<Key> java -jar ... --spring.profiles.active=dev,mysql` → `jmeter.bat -n -t docs/jmeter/s3a-chat-block.jmx -Jthreads=2 -Jloops=8 -Jrampup=10 -Jmsg=hello`（S3a message 已属性化 `-Jmsg`，默认 hello-stub 兼容桩组）→ `parse-turnmetrics.ps1`。
 
 ## 运行留痕
 
