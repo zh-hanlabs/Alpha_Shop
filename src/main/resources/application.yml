@@ -55,6 +55,10 @@ spring:
 
 # SimpleLoggerAdvisor 决策日志级别：W7 压测与问题定位的数据来源
 logging:
+  # W7D2 T2.2：压测取数双源之一——TurnMetrics 单行 JSON 落盘（环形缓冲仅 100 轮，压测以日志文件为准）；
+  # 各压测场景用 --logging.file.name 覆盖隔离，解析脚本 docs/jmeter/parse-turnmetrics.ps1
+  file:
+    name: logs/shopagent.log
   level:
     org.springframework.ai.chat.client.advisor: DEBUG
     org.springframework.ai.model.tool: DEBUG

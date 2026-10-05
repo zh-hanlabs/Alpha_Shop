@@ -95,15 +95,15 @@
 
 ### D2：JMeter 脚手架 + 基线
 
-- [ ] T2.1 四组 JMX 脚本（参数化 userId/orderNo，请求体对齐控制器实际签名 D2 现场核对）：S1 缓存详情（GET /api/dev/cache/product-detail）/ S2 交易下单（POST /api/dev/chaos/place-order，异键 CSV + 同键两组）/ S3a 聊天阻塞（POST /api/chat 桩 LLM）/ S3b SSE 流式（插件压 /api/chat/stream）
-- [ ] T2.2 桩 LLM 线程池化（F5 结果落地）+ 应用日志落盘（logging.file.name）+ TurnMetrics 单行 JSON 解析脚本（PS5 UTF-8 BOM：outcome 分布 / llmMs 分位 / 工具调用分布汇总）
-- [ ] T2.3 基线跑批（梯度 10→50 短窗口）：四脚本跑通 + JTL/HTML 报告生成 + 解析脚本与 JMeter 客户端数字双源对账一致 + 证据落 `docs/jmeter/`
+- [x] T2.1 四组脚本（请求体对齐控制器实际签名 D2 现场核对：**S2 端点实为 POST /api/dev/chaos/place，清单初稿 place-order 系笔误已修正**）：S1 缓存详情（s1-cache-detail.jmx）/ S2 交易下单拆异键+同键两个 JMX（s2-trade-unique.jmx + s2-trade-samekey.jmx，异键 CSV 500 唯一用户）/ S3a 聊天阻塞（s3a-chat-block.jmx 桩 LLM）/ S3b SSE 流式按 F4 定稿走 PS5 兜底（s3b-sse-burst.ps1，报 ttfb/done 收尾率/限流话术率）
+- [x] T2.2 桩 LLM 线程池化按 F5 改判维持现状 + 应用日志落盘（application.yml logging.file.name，场景间 --logging.file.name 覆盖隔离）+ TurnMetrics 单行 JSON 解析脚本（PS5 UTF-8 BOM：outcome 分布 / totalMs+llmMs+firstTokenMs 分位 / 工具与 token 汇总；FileShare.ReadWrite 支持解析活日志）
+- [x] T2.3 基线跑批（梯度 10→50 短窗口）：四脚本跑通 + JTL/HTML 报告生成 + 双源对账一致（限流开 22 OK+104 RL / 限流关 160 OK+130 RL 逐条对上客户端；S2 库存 199→98 与 audit 精确吻合）+ 证据落 `docs/jmeter/w7d2/`（w7d2-baseline.md 含基线数字表 + 踩坑 3 条：调限流参数必须清存量桶含 hash-tag 内部键 '*rlimit*' / JMeter 遇已存在 JTL 拒绝启动 / JTL 是带引号多行 CSV）
 
 ### D3：压测矩阵 + 数字落袋
 
 - [ ] T3.1 缓存冷/热两组（硬指标②）：冷=重启应用清 L1 + 仅 DEL 目标 L2 键首轮回源；热=预热全命中——QPS/P95 提升数字
-- [ ] T3.2 限流关/开两组（硬指标①）：聊天链路（桩 LLM）吞吐 / 429 比例 / P95 对比 + 全局桶 10/s 精确放行核验
-- [ ] T3.3 交易 ramp-up 并发：异键零超卖库存精确扣减 + 同键 ×N 并发全返首次（幂等 under load）
+- [ ] T3.2 限流关/开两组（硬指标①）：聊天链路（桩 LLM）吞吐 / 429 比例 / P95 对比 + 全局桶 10/s 精确放行核验【D2 runbook：切组前必须 `--scan --pattern '*rlimit*'` 全删存量桶（含 {..}:permits/:value 内部键），trySetRate 不覆盖活桶——D2 踩坑①】
+- [ ] T3.3 交易 ramp-up 并发：异键零超卖库存精确扣减 + 同键 ×N 并发全返首次（幂等 under load）【D2 runbook：CSV 每 JMeter 进程从头读，跨进程重复 userId 会命中幂等重放（行为正确但样本数≠新订单数），足量新单需分段用 CSV 或换文件，按 audit/stats 对账】
 - [ ] T3.4 真 LLM 小样本：真 DeepSeek 10-20 请求首 token/整轮 P50/P95 + 数字回填本清单 §一 + JTL/HTML/日志解析三件证据存档
 
 ### D4：Docker Compose
