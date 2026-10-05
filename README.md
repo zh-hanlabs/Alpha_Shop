@@ -1,8 +1,92 @@
-# ShopAgent · 对话式电商交易 Agent
+<p align="center">
+  <strong>8 周从零到一的简历项目</strong> · Spring AI Alibaba 实战 · v1.0 已收官（2026-10-05）
+</p>
 
-用自然语言完成「查—问—办」全流程的电商客服 Agent：模型自主决策调用工具（ReAct），把高并发交易系统的工程思维（**幂等 / 分布式锁 / 限流**，W3 起）迁移到 LLM Agent 场景。
+<h1 align="center">ShopAgent</h1>
 
-## 架构
+<p align="center">
+  对话式电商交易 Agent：用自然语言完成「查—问—办」全流程——<br>
+  把高并发交易系统的工程思维（<strong>幂等 / 分布式锁 / 限流</strong>）迁移到 LLM Agent 场景。
+</p>
+
+<p align="center">
+  <a href="https://github.com/zh-hanlabs/Alpha_Shop/stargazers"><img alt="GitHub Stars" src="https://img.shields.io/github/stars/zh-hanlabs/Alpha_Shop?style=social"></a>
+  <a href="https://github.com/zh-hanlabs/Alpha_Shop/releases"><img alt="Version" src="https://img.shields.io/badge/version-v1.0-FB6511"></a>
+  <a href="https://openjdk.org/"><img alt="JDK 17+" src="https://img.shields.io/badge/JDK-17%2B-007396?logo=openjdk&logoColor=white"></a>
+  <a href="https://spring.io/projects/spring-boot"><img alt="Spring Boot" src="https://img.shields.io/badge/Spring%20Boot-3.5.x-6DB33F?logo=springboot&logoColor=white"></a>
+  <a href="https://github.com/alibaba/spring-ai-alibaba"><img alt="Spring AI Alibaba" src="https://img.shields.io/badge/Spring%20AI%20Alibaba-1.1.x-FF6A00"></a>
+  <a href="https://github.com/zh-hanlabs/Alpha_Shop/commits/master"><img alt="Last Commit" src="https://img.shields.io/github/last-commit/zh-hanlabs/Alpha_Shop/master"></a>
+</p>
+
+<p align="center">
+  🤖 ReAct 自主决策 · 🔁 幂等重放 · 🔒 分布式锁 · 🚦 双层限流 · ⚡ 熔断降级 · 🧠 RAG 检索 · 🗄️ 两级缓存
+</p>
+
+<p align="center">
+  ⭐ 如果 ShopAgent 对你有帮助或启发，欢迎 <a href="https://github.com/zh-hanlabs/Alpha_Shop/stargazers"><strong>Star 项目</strong></a>；设计与踩坑实录持续更新，可 <a href="https://github.com/zh-hanlabs/Alpha_Shop/commits/master"><strong>Watch</strong></a> 获取最新进展。
+</p>
+
+---
+
+**ShopAgent** 是一个对话式电商客服 Agent：模型自主决策调用工具（ReAct），所有交易在工具层经统一闸序（锁外快查→抢锁→幂等→审计→解锁）后才执行——**正确性不依赖模型的自觉，闸序写在代码里**。
+
+[效果演示](#demo) · [核心能力](#capabilities) · [架构](#architecture) · [快速启动](#quickstart) · [安全设计](#security) · [压测与部署](#perf) · [踩坑实录](#pits) · [文档导航](#docs)
+
+> [!IMPORTANT]
+> **密钥安全**：API Key 只走环境变量（聊天 `DEEPSEEK_API_KEY` / 向量 `AI_DASHSCOPE_API_KEY`），任何代码、配置、测试与 Issue 都不要落盘真实密钥。
+
+<a id="capabilities"></a>
+
+## ✨ 核心能力
+
+| 能力 | 说明 |
+|---|---|
+| 查—问—办全流程 | 查订单/物流/商品、问商品知识（RAG）、办下单/退款/取消；交易先复述商品/数量/总价，用户二次确认后才落单 |
+| ReAct 自主决策 | 九个工具由模型自主选择调用；前端实时可视化「🔍 正在查询…」+ 回答打字机逐字输出 |
+| 幂等执行器 | 幂等键 = sha256(用户+动作+参数+会话+指令摘要)；同键重放**返回首次结果而非报错**（防 LLM 重试死循环）；Redis 故障交易 fail-closed |
+| 分布式锁 | Redisson RLock，锁粒度 = 用户+资源；`tryLock(3s)` + 看门狗续期；与幂等双保险：锁防并发双写，幂等防锁释放后的重放 |
+| 交易审计 | `trade_audit_log` 双出口埋点，同幂等键串成时间线；尽力而为不阻断交易——审计是物证不是闸门 |
+| 混沌验证 | C1-C7 dev-only 直连端点：同键 ×10 并发仅 1 单落库、异键 ×50 零超卖、Redis 停机交易 fail-closed 自愈 |
+| RAG 知识库 | 40 条商品域语料 → Redis Stack 向量检索 → 阈值截断 + bigram 规则重排 top3；指纹幂等启动 |
+| 两级缓存 | Caffeine L1 + Redis L2 只缓存展示字段，**库存永不缓存**；先更库再双删，一致性有界 |
+| 稳定性三件套 | 双层分布式限流（用户桶 2/1s + 全局桶 10/1s）+ LLM 熔断（滑窗/半开）+ 规则回复降级 + 轮级结构化观测 |
+| 会话记忆 Redis 化 | 重启 / 跨实例记忆连续（对照 W1 重启失忆）；TTL 7 天写时刷新 |
+| 压测实证 | 缓存冷热 **7.0 倍**吞吐、限流 429 拒绝率 **96.67%** 精确核验、交易 200 单**零超卖**、真 LLM 首 token P50 **735ms** |
+| 一键部署 | Docker Compose 编排 MySQL 8 + Redis Stack（healthcheck 就绪序）；H2 / MySQL 双 profile，克隆即跑 |
+
+<details>
+<summary><strong>功能实现明细（W1-W6 逐项实录，点开查看）</strong></summary>
+
+- **多轮记忆 + 会话隔离**：MessageWindowChatMemory 窗口语义（默认 20 条），conversationId 路由；W6D2 起挂 `RedisChatMemoryRepository`（hash+序号+两态 JSON，TTL 7 天写时刷新），重启/跨实例记忆连续（对照 W1 重启失忆）
+- **4 个查询工具，模型自主决策调用**：订单详情 / 物流轨迹 / 商品搜索 / 最近订单
+- **下单工具（W3D1-2）**：placeOrder 含库存原子扣减防超卖、价格快照、Prompt 二次确认（先复述商品/数量/总价，用户同意才执行）
+- **幂等执行器（W3D3）**：`infra/idempotent/` 显式插闸，幂等键 = sha256(用户+动作+参数+会话+指令摘要)；同键重放返回首次结果而非报错（防 LLM 重试死循环）；Redis 故障时交易 fail-closed
+- **分布式锁（W3D4）**：`infra/lock/` Redisson RLock，`tryLock(3s)` + 看门狗续期（不传 leaseTime）；锁粒度 = 用户+资源（下单按商品、退款取消按订单）；抢锁失败「操作处理中」不排队；`finally` 解锁 + `isHeldByCurrentThread` 防误删他人锁。与幂等双保险：**锁防并发双写（SETNX 检查窗口），幂等防锁释放后的重放**。实测 10 路并发同句下单（工具层 13 次执行挤入 2 秒竞态窗口）→ 仅 1 单落库、库存精确扣 1、6 路返回同一订单号、Redis 零锁残留
+- **退款/取消工具（W3D5）**：`TradeGuard` 统一闸序编排（result 锁外快查→抢锁→幂等→解锁，三工具共用）；退款状态机（已发货/已送达→已退款，退款中→已在流程，待付款→引导取消）、取消状态机（仅待付款）+ 按订单快照还库存；归属校验沿用「他人订单与不存在同话术」
+- **混沌测试（W4D1-2）**：dev-only 直连端点（`DevChaosController`，`@Profile("dev")`）绕过 LLM 直打工具层完整闸序，保证并发场景确定性。C1 同键并发 ×10 → 仅 1 单、10 路全部返回首次结果；C2 异键并发 ×50 → 50 单全部落库、库存 60→9 精确扣 50 零超卖；C3 同订单退款并发 ×10 → 全部返回首次退款结果、库存只还一次；C4 Redis 停机 → 交易 fail-closed「交易暂不可用」、查询链路（纯 H2）不受影响、Redis 恢复后交易自愈。脚本与证据存 `docs/chaos/`，可一键复现
+- **交易审计日志（W4D3）**：`trade_audit_log` 表记录每次到达闸序的尝试（首执/重放各一条，同 idempotent_key 串成时间线）；`TradeGuard` 双出口埋点——业务结果锁内随写（并发下审计顺序与实际执行顺序一致）、重放命中锁外快查即写；审计尽力而为不阻断交易（主交易已提交，审计失败仅 warn 兜底）；`placeOrder` 订单号留空经幂等键关联，退款/取消带 orderNo
+- **知识库 RAG（W5D1-2）**：商品域语料 40 条 → DashScope text-embedding-v4（1024 维）→ Redis Stack FLAT 向量索引；`KnowledgeIndexer` 指纹幂等启动（不变跳过/变更全量重建/分批≤10/fail-open）；`searchKnowledge` 召回 top5→阈值 0.5 截断→bigram 标题加权重排 top3；LLM 冒烟 10/10（事实全准/链式调用/无关问题零注入，证据 `docs/rag/`）
+- **两级缓存（W5D3）**：`TwoLevelCache` L1 Caffeine 500/60s + L2 Redisson 30min，商品展示字段缓存而**库存永不缓存**（`ProductDetailVO` 编译期无 stock 字段）；Cache Aside 先更库再双删实测回源新值；热点穿透计数打标；降级矩阵实测 Redis 停机→交易 fail-closed/缓存透传/知识降级聊天照常（证据 `docs/cache/`、`docs/chaos/C5`）
+- **Graph 编排升级（W5D4）**：ChatClient 直连 → `ShopAgentGraph` 状态图（START→loadMemory→chat→persistMemory→END），记忆读写显式节点化、token 流节点内旁路（spike 实证图 state 克隆边界，旁路对象走 invocation 持有表）；SSE 五类事件与前端零改动，断连语义改进（图照跑记忆照落，重放由幂等闸收束）
+- **稳定性三件套（W6）**：双层分布式限流 + LLM 熔断 + 规则回复降级 + 会话记忆 Redis 化 + 结构化轮级观测，详见「稳定性设计」章节；混沌 C1-C7 回归全 PASS + 双实例无状态演证（证据 `docs/resilience/`）
+- **工具调用可视化**：前端实时显示「🔍 正在查询订单 10001…」，回答打字机逐字输出
+- **身份注入防越权**：userId 走 ToolContext，模型无法伪造调用方身份；工具层订单归属校验
+
+</details>
+
+<a id="demo"></a>
+
+## 🎬 效果演示
+
+起完应用打开聊天页，一条会话走完「查→问→办」：**查**订单 10001 物流（走缓存 + 工具层实时查库）、**问**露营灯防水（走 RAG 知识库检索）、**办**下单（先二次确认再落单，底部 🔍 是每次工具调用的可视化）。
+
+![聊天页全流程：查→问→办](docs/screenshots/w8d4-chat-flow.png)
+
+> 图 1 · 聊天页全流程（真 DeepSeek + MySQL，会话 `web-15333aa0`，订单号 `20261005092103699563` 为实时下单结果）。首句英文（"I'll check the logistics…"）是模型在发起工具调用**之前**先吐出的过渡语，随 token 流一并落到前端——见「稳定性设计 · 已知局限与改进方向」第 7 条，W8 未改代码故如实保留。图内页面为 W8 时点旧版外观，W9D1 前端改版（暗色模式/悬浮卡片窗/消毒，见当前进度与踩坑 #21）后样式已更新，SSE 五类事件与工具文案未动——证据图按「只记不改」口径保留原貌不重拍。
+
+<a id="architecture"></a>
+
+## 🏗️ 架构
 
 ```mermaid
 flowchart LR
@@ -55,11 +139,15 @@ flowchart LR
 
 **分层铁律**：`tools/` 只做参数校验和编排，业务逻辑进 `service/`，横切能力（幂等/锁/审计/缓存/RAG）在 `infra/`。工具统一返回 `ToolResult{code, msg, data}`，异常在工具内消化不抛给模型；交易工具经 `TradeGuard` 统一闸序（锁外快查→抢锁→幂等→审计→解锁）后才进业务层——正确性不依赖模型的自觉，闸序写在代码里。
 
-## 技术栈
+## 🧰 技术栈
 
 JDK 17+ · Spring Boot 3.5.x · Spring AI 1.1.x · DeepSeek（聊天，OpenAI 兼容协议）+ DashScope（embedding，W5 起）· MyBatis-Plus · H2 · Redis + Redisson 3.52（W3 起幂等/锁）· Redis Stack 向量库 + Caffeine 两级缓存（W5 起）· 原生单页前端（零 Node 构建）
 
-## 快速启动
+<a id="quickstart"></a>
+
+## 🚀 快速启动
+
+仅需 JDK 17+ 与 Docker，Maven Wrapper 免安装，H2 内存库自动建表灌数据，克隆即跑：
 
 ```bash
 # 1. 配置模型 API Key，只走环境变量，勿写入任何文件
@@ -92,13 +180,8 @@ curl -X POST -H "Content-Type: application/json" `
   http://localhost:8080/api/chat
 ```
 
-起完应用打开聊天页，一条会话走完「查→问→办」：**查**订单 10001 物流（走缓存 + 工具层实时查库）、**问**露营灯防水（走 RAG 知识库检索）、**办**下单（先二次确认再落单，底部 🔍 是每次工具调用的可视化）。
-
-![聊天页全流程：查→问→办](docs/screenshots/w8d4-chat-flow.png)
-
-> 图 1 · 聊天页全流程（真 DeepSeek + MySQL，会话 `web-15333aa0`，订单号 `20261005092103699563` 为实时下单结果）。首句英文（"I'll check the logistics…"）是模型在发起工具调用**之前**先吐出的过渡语，随 token 流一并落到前端——见「稳定性设计 · 已知局限与改进方向」第 7 条，W8 未改代码故如实保留。图内页面为 W8 时点旧版外观，W9D1 前端改版（暗色模式/悬浮卡片窗/消毒，见当前进度与踩坑 #21）后样式已更新，SSE 五类事件与工具文案未动——证据图按「只记不改」口径保留原貌不重拍。
-
-### W7 · Docker Compose 一键部署（MySQL 8 + Redis Stack，替换上面对照表的 2/3 步）
+<details>
+<summary><strong>🐳 Docker Compose 一键部署（MySQL 8 + Redis Stack，替换上面对照表的 2/3 步，点开查看）</strong></summary>
 
 > 克隆三步：①一次性构建 redis-stack 本地镜像（deb 下载同上，SHA256 校验）②`docker-compose up -d` 拉起全部依赖并等 healthcheck ③起应用。交易数据落 MySQL 8（`dev,mysql` 双 profile，ADR D8），知识库向量索引随首次启动按指纹幂等重建（W5 机制，需 `AI_DASHSCOPE_API_KEY`）。
 
@@ -120,7 +203,9 @@ java -jar target/shopagent-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev,mysql
 > 加分项：app 容器化入编排（`docker-compose --profile fullstack up -d` 全栈容器演示，零网络 Dockerfile COPY jar）。
 > 数据卷：`redis-data` / `mysql-data` 命名卷，重建容器不丢数据；`docker-compose down -v` 才清空（清空后应用启动自动重建 schema/演示数据/向量索引）。
 
-## 接口
+</details>
+
+## 🔌 接口
 
 | 接口 | 说明 |
 |---|---|
@@ -130,24 +215,9 @@ java -jar target/shopagent-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev,mysql
 
 请求体：`{"conversationId": "...", "message": "...", "userId": "u1001"}`（userId 缺省为演示用户 u1001；不同 conversationId 上下文互相隔离）
 
-## 已实现功能
+<a id="security"></a>
 
-- **多轮记忆 + 会话隔离**：MessageWindowChatMemory 窗口语义（默认 20 条），conversationId 路由；W6D2 起挂 `RedisChatMemoryRepository`（hash+序号+两态 JSON，TTL 7 天写时刷新），重启/跨实例记忆连续（对照 W1 重启失忆）
-- **4 个查询工具，模型自主决策调用**：订单详情 / 物流轨迹 / 商品搜索 / 最近订单
-- **下单工具（W3D1-2）**：placeOrder 含库存原子扣减防超卖、价格快照、Prompt 二次确认（先复述商品/数量/总价，用户同意才执行）
-- **幂等执行器（W3D3）**：`infra/idempotent/` 显式插闸，幂等键 = sha256(用户+动作+参数+会话+指令摘要)；同键重放返回首次结果而非报错（防 LLM 重试死循环）；Redis 故障时交易 fail-closed
-- **分布式锁（W3D4）**：`infra/lock/` Redisson RLock，`tryLock(3s)` + 看门狗续期（不传 leaseTime）；锁粒度 = 用户+资源（下单按商品、退款取消按订单）；抢锁失败「操作处理中」不排队；`finally` 解锁 + `isHeldByCurrentThread` 防误删他人锁。与幂等双保险：**锁防并发双写（SETNX 检查窗口），幂等防锁释放后的重放**。实测 10 路并发同句下单（工具层 13 次执行挤入 2 秒竞态窗口）→ 仅 1 单落库、库存精确扣 1、6 路返回同一订单号、Redis 零锁残留
-- **退款/取消工具（W3D5）**：`TradeGuard` 统一闸序编排（result 锁外快查→抢锁→幂等→解锁，三工具共用）；退款状态机（已发货/已送达→已退款，退款中→已在流程，待付款→引导取消）、取消状态机（仅待付款）+ 按订单快照还库存；归属校验沿用「他人订单与不存在同话术」
-- **混沌测试（W4D1-2）**：dev-only 直连端点（`DevChaosController`，`@Profile("dev")`）绕过 LLM 直打工具层完整闸序，保证并发场景确定性。C1 同键并发 ×10 → 仅 1 单、10 路全部返回首次结果；C2 异键并发 ×50 → 50 单全部落库、库存 60→9 精确扣 50 零超卖；C3 同订单退款并发 ×10 → 全部返回首次退款结果、库存只还一次；C4 Redis 停机 → 交易 fail-closed「交易暂不可用」、查询链路（纯 H2）不受影响、Redis 恢复后交易自愈。脚本与证据存 `docs/chaos/`，可一键复现
-- **交易审计日志（W4D3）**：`trade_audit_log` 表记录每次到达闸序的尝试（首执/重放各一条，同 idempotent_key 串成时间线）；`TradeGuard` 双出口埋点——业务结果锁内随写（并发下审计顺序与实际执行顺序一致）、重放命中锁外快查即写；审计尽力而为不阻断交易（主交易已提交，审计失败仅 warn 兜底）；`placeOrder` 订单号留空经幂等键关联，退款/取消带 orderNo
-- **知识库 RAG（W5D1-2）**：商品域语料 40 条 → DashScope text-embedding-v4（1024 维）→ Redis Stack FLAT 向量索引；`KnowledgeIndexer` 指纹幂等启动（不变跳过/变更全量重建/分批≤10/fail-open）；`searchKnowledge` 召回 top5→阈值 0.5 截断→bigram 标题加权重排 top3；LLM 冒烟 10/10（事实全准/链式调用/无关问题零注入，证据 `docs/rag/`）
-- **两级缓存（W5D3）**：`TwoLevelCache` L1 Caffeine 500/60s + L2 Redisson 30min，商品展示字段缓存而**库存永不缓存**（`ProductDetailVO` 编译期无 stock 字段）；Cache Aside 先更库再双删实测回源新值；热点穿透计数打标；降级矩阵实测 Redis 停机→交易 fail-closed/缓存透传/知识降级聊天照常（证据 `docs/cache/`、`docs/chaos/C5`）
-- **Graph 编排升级（W5D4）**：ChatClient 直连 → `ShopAgentGraph` 状态图（START→loadMemory→chat→persistMemory→END），记忆读写显式节点化、token 流节点内旁路（spike 实证图 state 克隆边界，旁路对象走 invocation 持有表）；SSE 五类事件与前端零改动，断连语义改进（图照跑记忆照落，重放由幂等闸收束）
-- **稳定性三件套（W6）**：双层分布式限流 + LLM 熔断 + 规则回复降级 + 会话记忆 Redis 化 + 结构化轮级观测，详见「稳定性设计」章节；混沌 C1-C7 回归全 PASS + 双实例无状态演证（证据 `docs/resilience/`）
-- **工具调用可视化**：前端实时显示「🔍 正在查询订单 10001…」，回答打字机逐字输出
-- **身份注入防越权**：userId 走 ToolContext，模型无法伪造调用方身份；工具层订单归属校验
-
-## 安全设计（W1D8 边界测试实录）
+## 🛡️ 安全设计（W1D8 边界测试实录）
 
 安全分两层：**System Prompt 是体验层**（拒答话术），**工具层归属校验是安全边界**（LLM 可被诱导绕过，代码不可）。
 
@@ -161,10 +231,12 @@ java -jar target/shopagent-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev,mysql
 | 6 | 幻觉订单号（99999） | 「没有查到物流记录，可能订单号有误」+ 主动提出查最近订单 | 工具 notFound + Prompt |
 | 7 | 参数缺失（「我的订单到哪了」没给单号） | 模型自主调 recentOrders → 锁定最新订单查物流，还提醒待付款订单 | 工具编排 |
 
-关键实现决策：**「他人订单」与「订单不存在」返回同一种结果**。若区分二者，攻击者可探测任意订单号是否存在（信息泄露）；不区分则探测无意义。
+> [!NOTE]
+> 关键实现决策：**「他人订单」与「订单不存在」返回同一种结果**。若区分二者，攻击者可探测任意订单号是否存在（信息泄露）；不区分则探测无意义。
 
-## 交易安全设计（W3-W4 实录）
+## 💰 交易安全设计（W3-W4 实录）
 
+> [!TIP]
 > 核心命题：LLM 不可靠——会重试、会重放、会传错参数。把高并发交易系统的工程思维迁移到 Agent 工具层：**正确性不依赖模型的自觉，闸序写在代码里**。
 
 ### 三件套分工
@@ -241,8 +313,9 @@ dev-only 直连端点（`@Profile("dev")`）绕过 LLM 直打工具层完整闸�
 3. **Redis 单点**：单机 Redisson 无主从/哨兵。fail-closed 保证 Redis 不可用时宁可拒绝交易也不裸跑——正确性优先于可用性的显式取舍，生产需集群化。
 4. **审计不在业务事务内**：主交易提交后尽力写，极端情况可能缺记录——「物证」定位与强一致的取舍，不阻断交易是第一原则。
 
-## RAG 与多级缓存设计（W5 实录）
+## 🧠 RAG 与多级缓存设计（W5 实录）
 
+> [!TIP]
 > 核心命题：让模型「按知识库说话」而不是按参数记忆说话；让商品读取「快」而不「脏」。两条边界：**token 流不穿过图状态**（spike 实证），**库存永不进缓存**（正确性字段零缓存）。
 
 ### RAG 检索分层（`infra/rag/` + `service/KnowledgeService`）
@@ -303,7 +376,7 @@ Redis 停机时按业务代价分级——**交易错一笔是真金白银，知
 3. **知识库只覆盖商品域** 40 条：不做通用爬取（砍单线），召回质量靠语料 fixture 迭代。
 4. **重排是规则不是模型**：bigram 匹配对同义改写无感知（「防水吗」vs「能碰水吗」靠向量分兜底），规模化后 reranker 是第一升级项。
 
-## 稳定性设计（W6 实录）
+## 🛰️ 稳定性设计（W6 实录）
 
 护的是 LLM API 这条最贵最脆的外呼链路——**限流挡量、熔断止损、降级保体感、观测留证据**。全程不破坏 W3 交易安全与 W5 缓存/RAG 语义（混沌 C1-C7 回归全 PASS）。
 
@@ -360,8 +433,11 @@ CLOSED --5 连败(5/5=100%≥50%, min5 满)--> OPEN --短路(瞬时, notPermitte
 7. **工具调用前的模型过渡语会混进正文流**：DeepSeek 在发起 tool call 之前先吐一句英文过渡语（"I'll check the logistics for order 10001."），SSE 把它当普通 token 一并推给前端，于是中文回答开头夹一句英文（README 图 1 即原样保留，未美化）。缓解=提示词约束「不输出思考过程/过渡语」+ 前端按需过滤；根治要区分「面向用户的 token 流」与「工具决策前的草稿流」，属 W8 零代码改动红线外的体验项，未动。功能与安全性不受影响——闸序在工具层，过渡语进不了交易参数。
 8. **模型可能「口头执行」——不调工具直接宣称交易成功**：W8D5 真 LLM 终验现场复现（`docs/deploy/w8d5-demo-evidence.txt` 步骤 4）：同会话里模型先查了订单 10002、按红线请求确认，用户回「确认退款」后它**没有调用 RefundOrderTool**，却生成了一段带订单号、金额 ¥334.00、「退款处理中」状态的完整成功话术；而 `toolCalls={}`、`trade_audit_log` 零新增、`orders.10002` 仍 DELIVERED、库存未变。这是本项目核心命题的反面补集：**幂等/锁/状态机三件防线都在工具层，它们只能保护「进了闸」的请求，管不到「假装进过闸」的模型**。抓住它靠的正是取数双源——审计表与库内真值少一行就是没发生，观测层的 `toolCalls` 计数是第三道印证（该轮 outcome=OK 所以光看结果分会漏）。缓解路径（W8 零代码改动红线外，留作演进）：交易意图轮强制 `tool_choice=required`、或对「宣称交易成功但零工具调用」的轮次做后置 nudge 重试；再进一步是前端只渲染带审计凭证（订单号可反查）的交易结论。实测换一个新会话重试同一意图，模型先自查状态、确认后真实调用工具并落库 REFUNDED + 还库存 +1——即链路与防线本身无缺陷，缺的是「模型必须真的调工具」这一层约束。
 
-## 压测与部署（W7 实录）
+<a id="perf"></a>
 
+## 📊 压测与部署（W7 实录）
+
+> [!NOTE]
 > 取数双源与全部证据：`docs/jmeter/`（JMX/JTL/解析输出 + w7d2 基线 + w7d3 矩阵两份报告）；环境口径=单机 localhost、JMeter 5.6.3 CLI、JDK 21、应用 `dev,mysql`。
 
 ### 压测矩阵数字（W7D2 基线 + W7D3 落袋）
@@ -411,7 +487,7 @@ CLOSED --5 连败(5/5=100%≥50%, min5 满)--> OPEN --短路(瞬时, notPermitte
 
 `docker-compose up -d` 拉起 redis-stack（本地镜像禁 pull + **AOF 持久化落在卷上**：W7D5 开 `--appendonly`，W8D4 终验补 `--dir /data` 才真正钉到挂载点，见踩坑 #19）+ MySQL 8.4（healthcheck 就绪序：带密码 root ping 防 init 临时 server 误报）→ 应用 `dev,mysql` 双 profile（宿主机或 `--profile fullstack` 容器化）。克隆三步见「快速启动」；部署冒烟证据（克隆体验/查问办/C2 抽查/索引重建）见 `docs/deploy/w7d4-compose-smoke.md`，终稿文档下的从零复验 + 容器重建持久化复验见 `docs/deploy/w8d4-final-smoke.txt`。
 
-## 模型切换
+## 🔄 模型切换
 
 W5D0 起聊天与 embedding 分路由（`spring.ai.model.*` 路由键，双 starter 共存零冲突）：
 
@@ -419,7 +495,14 @@ W5D0 起聊天与 embedding 分路由（`spring.ai.model.*` 路由键，双 star
 - **embedding**：固定 DashScope `text-embedding-v4`（`spring.ai.model.embedding.text: dashscope`）。两个坑：SAA 的路由键是 `embedding.text` 不是 Spring AI 标准键 `embedding`；且 `spring.ai.model.embedding` 必须显式 `none` 关掉 openai 侧默认装配（各路由条件 matchIfMissing=true），否则容器内出现两个 EmbeddingModel 启动冲突
 - **切 embedding 模型 = 维度变 = 向量索引必须重建**（D1 起由 `FT.INFO` 校验维度一致，见 W5 任务清单 §2.2）
 
-## 踩坑实录
+<a id="pits"></a>
+
+## 🕳️ 踩坑实录（21 条）
+
+每一坑都是真实事故实录，修复方案均经验证；族谱式的教训沉淀（「数字要能被第三方复算」「看起来在工作不等于在工作」）贯穿全项目。点开查看全部：
+
+<details>
+<summary><strong>展开全部 21 条踩坑</strong></summary>
 
 1. **Windows 下 `data.sql` 中文乱码**：Spring 默认平台编码（GBK）读 UTF-8 脚本，中文名匹配测试全挂。修复：`spring.sql.init.encoding: UTF-8`。
 2. **Prompt 职责边界 vs 用户意图**：测试多轮记忆时让模型复述「暗号 PIZZA123」被拒——不是记忆失效，是 System Prompt 只谈购物话题把无恶意请求也拒了。边界要写「不生硬拒绝，引导回购物场景」。
@@ -443,12 +526,40 @@ W5D0 起聊天与 embedding 分路由（`spring.ai.model.*` 路由键，双 star
 20. **模型会「口头退款」：验收 LLM 链路不能听它说了什么，要看库里多了哪一行（W8D5 真 LLM 终验钓出）**：对话「确认退款」那一轮，模型返回一段完整的成功话术（订单号 + ¥334.00 + 退款处理中），HTTP 200、`outcome=OK`、`completionTokens=74` 一切正常——但 `toolCalls={}`、`trade_audit_log` 该时段零新增、`orders.10002` 仍是 DELIVERED、库存一格没动。它压根没调 `RefundOrderTool`。这一类缺陷**不可能被幂等/锁/状态机拦住**：三件防线的入口都在工具层（`TradeGuard`），请求没进闸就没有防线可言，这是「防线位置」的覆盖边界而非防线的漏洞。定位全靠独立口径的副作用真值：审计表行数、库内状态、观测层工具计数三源互相一比对不上，而**结果分（HTTP 200 + OK）完全看不出来**。收口口径：交易类结论必须能被「库里那一行」反查，模型话术只当 UI 文案不当凭证；改进方向见「稳定性设计 · 已知局限与改进方向」第 8 条（`tool_choice=required` / 空转轮 nudge / 前端仅渲染带凭证的交易结论）。族谱：踩坑 #18（数字要能被第三方复算）、#5（别拿 scale 当身份）、#16（测试夹具污染也能伪装成功能 bug）——三次都是「现场说得过去，独立口径一算就不对」。
 21. **打字机是空转的：渲染 `rendered + queue` 恒等于全文（W9D1 前端优化读码时钓出）**：`index.html` 的打字机每 tick 从 queue 消费 N 字进 rendered，渲染的却是 `rendered + queue`——两者拼接恒等于已收到的全文，所以八周以来「逐字输出」的体感其实来自 **SSE 分块到达 + 每 16ms 全量重渲染**，打字逻辑对画面零贡献（「工具调用可视化」里「回答打字机逐字输出」的描述在 W9D1 前是靠分块到达圆谎的）。为什么一直没被发现：视觉结果（一块块出字）与逐字肉眼难辨、功能完全正确，只有读实现才会发现这条 invariant 让打字机无效。修复：只渲染 `rendered`（真逐字）+ 重渲染节流 ~20fps（`done` 后快速放完）。教训：**「看起来在工作」不等于「在工作」，视觉正确会掩盖逻辑空转**——与踩坑 #18 同族（证据要能被复算）：体感证据也要对得上机制，读码审计不是可选项。
 
-## 当前进度
+</details>
 
-**W1-W8 全部完成**（2026-10-05 收官，轻量标签 `v1.0` 指向 W8 最终 commit）。主计划 §12 六项项目级 DoD：**5 项已核销**（演示链路 / 压测数字 / README / commit 历史 / Compose），第 6 项「每条简历 bullet 扛住三层追问」的**文档层已就位**（5 bullet × 三层 = 15 问答存档 + 29 项自测清单），最终判定权在本人脱稿复述——这一格不由文档代勾。
+<a id="progress"></a>
+
+## 📈 当前进度
+
+**W1-W8 全部完成**（2026-10-05 收官，轻量标签 `v1.0`）· W9D1 完成前端显示优化与消毒修复（v1.0 冻结后首笔 src/ 改动）。主计划 §12 六项项目级 DoD 已核销 5 项，第 6 项「每条简历 bullet 扛住三层追问」文档层就位、最终判定权在本人脱稿复述。逐周收官记录点开查看：
+
+<details>
+<summary><strong>逐周收官记录（W9D1 / W8 / W7）</strong></summary>
+
+**W1-W8 总述**：轻量标签 `v1.0` 指向 W8 最终 commit。主计划 §12 六项项目级 DoD：**5 项已核销**（演示链路 / 压测数字 / README / commit 历史 / Compose），第 6 项「每条简历 bullet 扛住三层追问」的**文档层已就位**（5 bullet × 三层 = 15 问答存档 + 29 项自测清单），最终判定权在本人脱稿复述——这一格不由文档代勾。
 
 **W9D1（前端显示优化与消毒修复，v1.0 冻结后的 src/ 改动）**：只动 `resources/static/index.html` 一个文件（原生单文件零构建红线不破，后端/pom/compose 零改动，140 单测口径不受影响）。显示层：暗色模式（`prefers-color-scheme` 变量全套 + `color-scheme`/`theme-color` 声明）、桌面悬浮卡片窗与移动端 `100dvh` 全屏自适应（外边距塌陷、矮视口 min-height 两处页面级滚动条实测归零）、消息入场动画、markdown 代码块/引用/标题样式、细滚动条、`prefers-reduced-motion` 降级、iOS 输入 16px 防缩放、`aria-live` 无障碍。修复三处显示缺陷：①**打字机空转**——原实现渲染 `rendered + queue` 恒等于全文，逐字队列对画面零贡献，「逐字输出」体感实为 SSE 分块到达（踩坑 #21），改为只渲染已消费部分并节流 ~20fps；②**markdown 白名单消毒**——模型会原样回显用户输入而 marked 默认放行原始 HTML（`<img onerror>` / `javascript:` 链接注入面），加 template+DOM 白名单清洗（零新依赖、离线可用），真浏览器实测恶意向量全拦、正常链接/表格/加粗保留；③**error 事件覆盖竞态**——先停打字机再写错误文案防残留队列覆盖，流意外终止也收尾光标。另加智能滚动（贴底才跟随、向上翻史不被拽走 + 回到底部浮动按钮）。真浏览器截图验证：桌面亮/暗色、390px 移动端、消毒语义、错误路径全过；SSE 五类事件协议与后端零改动。
 
 **W8 收官（打磨 + 交付物）**：`docs/resume/shopagent-bullets.md` 对外交付物（项目段落 + 5 条 bullet 对照主计划 §0 映射表全覆盖 + 数字出处表 18 行带锚点 + 按周分段档案附二）；`docs/study/project-overview-interview.md` 对内追问弹药（§11 主题问答 28 条 + 三层追问自测存档 15 问答、§12 已知局限三段式应答表 22 行、§13 自测清单 29 项）；commit 全量校对 **零违规**（D3 复核 70/70、W8D5 收官重扫 **74/74**，分布 W1×30 / W3×6 / W4×5 / W5×9 / W6×6 / W7×10 / W8×8，复算命令 `git log --format='%s' | grep -vcE '^W[0-9]+D[0-9]+: '` 输出 0；74/74 与 W8×8 为收官校对时点值，总数随每笔 commit 递增、不作冻结口径）+ 每段首末抽样 14 条 `git show --stat` 标题相符（只校对不改写历史）；README 三图入仓 `docs/screenshots/`（聊天页全流程 / 混沌 C1 / JMeter 冷热）+ 终稿校对（`docs/**` 引用路径存在性全查零 MISSING）；**克隆即跑终验**用独立 compose 项目 + 全新卷从零走通 8 项判定（`docs/deploy/w8d4-final-smoke.txt`），**钓出部署层真 bug**：deb 版 redis-stack 默认 `dir` 不在挂载点，AOF 写在容器可写层，`down/up` 重建容器即丢 → 最小修复 `--dir /data` 另立 commit（踩坑 #19）；**真 DeepSeek 终验**查→问→办（含退款）13 轮 + 幂等跨层重放 + `redis-cli MONITOR` 命令级锁证据（`docs/deploy/w8d5-demo-evidence.txt`），并钓出第四个真问题「模型口头退款」（踩坑 #20 / 已知局限第 8 条）；W8D5 复跑单测口径**数字零动**（140 中 133 绿 + 7 跳）。
 
 **W7 收官（数字 + 部署）**：JMeter 四组脚本（S1 缓存 / S2 交易异键+同键 / S3a 聊天桩 / S3b SSE）+ TurnMetrics 日志解析双源取数；**DoD 两项硬指标落袋**——缓存冷热 523.6/s→3644.3/s ≈7.0 倍（P95 162→23ms，吞吐口径见「压测矩阵数字」下方注记）、限流关/开同形突发 300 全过 vs 放行 10（96.67% 429、全局桶 10/s 精确核验）；交易 ramp-up 200 单零超卖库存精确对账 + 同键 100 并发仅 1 单；真 DeepSeek 小样本（首 token P50=735ms、整轮 P50=1045ms、usage 真回传 17/17、链路开销 <6%）；**Docker Compose 一键部署**（redis-stack 本地镜像禁 pull + MySQL 8.4 healthcheck 就绪序 + app 容器化加分项 `--profile fullstack`）+ 克隆体验验证（空库 init 自动播种 + 向量索引指纹重建）；H2→MySQL 双 profile（dev 默认 H2 clone 即跑零动，压测/部署走 `dev,mysql`）；混沌 C1-C7 最终构建回归全 PASS（C3 首跑钓出 order_item init 幂等缺口并修复，C5 钓出 redis 停机不落盘并以 AOF 加固）+ 单测 140/133 绿。README「压测与部署」章节 + 架构图（MySQL/Compose/JMeter 边界）+ 踩坑 #14-17 刷新到位。W1-W6（MVP/交易安全/RAG+缓存/稳定性）此前完成。路线图见 `shopagent-master-plan.md`，各周任务清单见 `shopagent-w1w2-mvp-tasks.md` → `shopagent-w8-tasks.md`（逐日决策与验收记录）。
+
+</details>
+
+<a id="docs"></a>
+
+## 📚 文档导航
+
+| 文档 | 内容 |
+|---|---|
+| [shopagent-master-plan.md](shopagent-master-plan.md) | **唯一事实来源**：路线图、ADR、设计细节、禁止清单 |
+| [周任务清单](shopagent-w1w2-mvp-tasks.md)（[W3-W4](shopagent-w3w4-tasks.md) / [W5](shopagent-w5-tasks.md) / [W6](shopagent-w6-tasks.md) / [W7](shopagent-w7-tasks.md) / [W8](shopagent-w8-tasks.md)） | 各周任务拆解，逐日决策与验收记录 |
+| [docs/resume/shopagent-bullets.md](docs/resume/shopagent-bullets.md) | 对外交付物：简历项目段落 + 5 条 bullet + 数字出处表（带锚点） |
+| [docs/study/project-overview-interview.md](docs/study/project-overview-interview.md) | 对内追问弹药：主题问答 / 三层追问存档 / 已知局限应答 / 自测清单 |
+| [docs/chaos/](docs/chaos/) | 混沌测试 C1-C7 脚本与跑批证据，可一键复现 |
+| [docs/jmeter/](docs/jmeter/) | 压测脚本 JMX / JTL 原始数据 / 解析输出与矩阵报告 |
+| [docs/deploy/](docs/deploy/) | 部署冒烟与终验证据（含克隆即跑从零复验、真 LLM 演示链路） |
+| [docs/resilience/](docs/resilience/) · [docs/cache/](docs/cache/) · [docs/rag/](docs/rag/) | 稳定性 / 缓存 / RAG 各域实测证据 |
+| [docs/screenshots/](docs/screenshots/) | README 三图（聊天页全流程 / 混沌 C1 / JMeter 冷热）原始截图 |
+| [AGENTS.md](AGENTS.md) | 仓库级开发规则（AI 编码助手必读；分层铁律 / 测试口径 / 密钥安全） |
