@@ -89,6 +89,28 @@ curl -X POST -H "Content-Type: application/json" `
   http://localhost:8080/api/chat
 ```
 
+### W7 · Docker Compose 一键部署（MySQL 8 + Redis Stack，替换上面对照表的 2/3 步）
+
+> 克隆三步：①一次性构建 redis-stack 本地镜像（deb 下载同上，SHA256 校验）②`docker-compose up -d` 拉起全部依赖并等 healthcheck ③起应用。交易数据落 MySQL 8（`dev,mysql` 双 profile，ADR D8），知识库向量索引随首次启动按指纹幂等重建（W5 机制，需 `AI_DASHSCOPE_API_KEY`）。
+
+```bash
+# ① 一次性：构建 redis-stack 本地镜像（禁 pull；deb 约 59MB 不入 git）
+docker build -t shopagent/redis-stack-server:7.4.0-v8 docker/redis-stack-server
+
+# ② 一键拉起依赖（healthcheck 就绪序：redis healthy → mysql → init 完成；compose 编排含凭据 .env 注入）
+#    凭据样例见 .env.example（本地演示默认值即可跑）；密钥类只走系统环境变量不写入 .env
+docker-compose up -d
+docker-compose ps   # 等 shopagent-mysql 变 healthy（首次 init 约 30-60s）
+
+# ③ 起应用（MySQL 数据源；PowerShell 语法，密钥同上面第 1 步）
+$env:MYSQL_PORT = "13306"
+mvn -q -DskipTests package
+java -jar target/shopagent-0.0.1-SNAPSHOT.jar --spring.profiles.active=dev,mysql
+```
+
+> 加分项：app 容器化入编排（`docker-compose --profile fullstack up -d` 全栈容器演示，零网络 Dockerfile COPY jar）。
+> 数据卷：`redis-data` / `mysql-data` 命名卷，重建容器不丢数据；`docker-compose down -v` 才清空（清空后应用启动自动重建 schema/演示数据/向量索引）。
+
 ## 接口
 
 | 接口 | 说明 |

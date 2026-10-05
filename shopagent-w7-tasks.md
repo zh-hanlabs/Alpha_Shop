@@ -27,7 +27,7 @@
 - [ ] 交易并发压测：ramp-up 异键并发零超卖、库存精确扣减；同键 ×N 并发全返首次
 - [x] 真 LLM 小样本延迟参照（D3 T3.4）：真 DeepSeek 16+1 请求，**首 token P50=735ms/P95=1041ms、整轮 P50=1045ms/P95=1524ms**，链路开销 <6%（totalMs−llmMs）——「链路吞吐 96.5/s（桩）≠ LLM 体感 ~1s/轮（真）」两口径分开陈述；**usage 真回传 17/17**（W6D4 预留的 stream-usage 验证收口）；README 口径段随 T5.2（主计划 §11 DoD，证据 docs/jmeter/w7d3/parse-real.txt）
 - [ ] 取数双源：JMeter JTL/HTML（客户端）+ TurnMetrics 单行 JSON 日志解析脚本（服务端 outcome/llmMs/工具分布），双源口径对齐写清
-- [ ] Docker Compose 一条命令拉起全部依赖（redis-stack 本地镜像 + MySQL 8 + healthcheck + .env 注入），README 克隆后三步启动
+- [x] Docker Compose 一条命令拉起全部依赖（redis-stack 本地镜像 + MySQL 8 + healthcheck + .env 注入，D4 实测 redis 6s→mysql 15s healthy 就绪序）+ README 克隆三步（草稿段已入 README，T5.2 打磨）+ 加分项 app 容器化入 fullstack profile
 - [ ] README「压测与部署」章节 + 架构图刷新 + 踩坑实录补条 + 混沌 C1-C7 回归 PASS + 主计划 W7 ✅ + commit `W7D{n}` 校对
 
 ---
@@ -108,9 +108,9 @@
 
 ### D4：Docker Compose
 
-- [ ] T4.1 compose.yml（redis-stack 本地镜像 build + MySQL 8 + healthcheck + depends_on + .env 注入）+ .env.example 扩展（MySQL 凭据样例）+ 一键启动 README 草稿段（克隆三步）
-- [ ] T4.2 部署冒烟：`docker compose up -d` → healthcheck 就绪 → 应用 `dev,mysql` 连容器中间件 → 查/问/办演示一轮 + 知识库索引指纹重建验证 + 混沌 C2 抽查（容器 MySQL 上零超卖）
-- [ ] T4.3 （加分，按 T0.3 探路结果裁）app 镜像：mvn package + COPY jar 零网络 Dockerfile 入编排，compose 内全栈演示一轮
+- [x] T4.1 compose.yml（redis-stack 本地镜像 build 禁 pull + mysql:8.4 + healthcheck 就绪序【mysql 带密码 root ping 防 init 误报】+ depends_on redis→mysql + .env 注入）+ .env.example 扩展（MySQL 样例 + 密钥不落 .env 声明）+ README 草稿段（克隆三步）；实况：Compose v5.1.4 独立命令 `docker-compose`（v2 插件未装配）
+- [x] T4.2 部署冒烟：迁除旧 docker run 容器（匿名卷退役）→ `docker-compose up -d` redis 6s/mysql 15s healthy → 应用 `dev,mysql` 连容器中间件 → **克隆体验验证（全新卷 product2 回种子值 200=init 自动播种）** + 查/问/办一轮（真 DeepSeek 中文问答+工具调用零乱码、下单落 MySQL 200→199）+ **知识库索引指纹重建 40 条/1784ms（空 Redis 自动触发，W5 机制零改动）** + 混沌 C2 抽查 PASS（容器 MySQL 50/50 零超卖 100→50，跨库语义第四次实证）
+- [x] T4.3 加分项：eclipse-temurin:21-jre 拉取成功（472MB，断网前科未复现）→ 零网络 Dockerfile（COPY jar + .dockerignore 全排除仅放行 jar，context=仓库根）入编排 `profiles: ["fullstack"]`（默认 up 只起依赖不变）→ 容器内 SPRING_DATA_REDIS_HOST=redis 宽松绑定 + MYSQL_HOST=mysql 服务名 + 容器内端口落 yml 默认 3306 防宿主 13306 干扰 → 全栈演示一轮（容器内索引重建 40 条/2581ms 二次验证 + 中文问答零乱码）
 
 ### D5：buffer + 收尾
 

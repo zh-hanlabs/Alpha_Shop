@@ -1,0 +1,76 @@
+# W7D4（ADR D8 后续，shopagent-w7-tasks.md §2.3 定稿）：compose 只编排依赖中间件，app 宿主机跑（压测本就打本地 app）。
+# redis-stack 禁止 pull——本地自建镜像（deb 按 docker/redis-stack-server/ 说明一次性下载，gitignore 不入仓）；
+# MySQL 用 F2 探路定版的 mysql:8.4 镜像；凭据经 .env 注入（样例见 .env.example；密钥类只走系统环境变量不落盘）。
+# T4.3 加分项：app 容器化挂 fullstack profile——`docker-compose --profile fullstack up -d` 才启动，
+# 默认 `up -d` 维持「只起依赖」的克隆三步体验不变。
+services:
+  redis:
+    build: docker/redis-stack-server
+    image: shopagent/redis-stack-server:7.4.0-v8
+    container_name: shopagent-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      # redis-stack-server 镜像基于 redis:7 + 官方 deb 解包，redis-cli 在
+      test: ["CMD-SHELL", "redis-cli ping | grep PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+
+  mysql:
+    image: mysql:8.4
+    container_name: shopagent-mysql
+    # 就绪序（§2.3 定稿）：redis 健康后才起 mysql——单机演示链路的确定性启动
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      # 宿主 3306 常被本机 mysqld 占用（W7D1 实况），默认改挂 13306；app 侧同读 MYSQL_PORT
+      - "${MYSQL_PORT:-13306}:3306"
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-shopagent}
+      MYSQL_USER: ${MYSQL_USERNAME:-shopagent}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-shopagent}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root-shopagent}
+      # 与应用时钟对齐（W7D1 实况：相对时间 mock 与日志时区一致）
+      TZ: Asia/Shanghai
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      # 用带密码的 root ping：首次 init 的临时 server（root 密码未设）不会误报健康，
+      # init 完成真重启后才开始放行——healthcheck 就绪即「schema 可用」
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  # T4.3 加分项（非欠账）：零网络 Dockerfile（W5D0 playbook）——mvn package 后 COPY jar，
+  # 不引入 buildpacks（需网络）。容器内连接串走服务名（SPRING_DATA_REDIS_HOST 宽松绑定 / MYSQL_HOST 占位），
+  # 容器内 MYSQL_PORT 落 yml 默认 3306（服务间端口），与宿主 13306 互不干扰
+  app:
+    build:
+      context: .
+      dockerfile: docker/app/Dockerfile
+    image: shopagent/app:latest
+    container_name: shopagent-app
+    profiles: ["fullstack"]
+    depends_on:
+      mysql:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    environment:
+      SPRING_PROFILES_ACTIVE: dev,mysql
+      MYSQL_HOST: mysql
+      SPRING_DATA_REDIS_HOST: redis
+      # 密钥经宿主环境透传（.env 不落密钥，AGENTS.md 规则 4）；容器化演示不配 Key 时降级链路仍可看
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+      AI_DASHSCOPE_API_KEY: ${AI_DASHSCOPE_API_KEY:-}
+
+volumes:
+  redis-data:
+  mysql-data:
