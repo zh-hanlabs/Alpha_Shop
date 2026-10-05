@@ -408,7 +408,7 @@ CLOSED --5 连败(5/5=100%≥50%, min5 满)--> OPEN --短路(瞬时, notPermitte
 
 ### 部署形态
 
-`docker-compose up -d` 拉起 redis-stack（本地镜像禁 pull + **AOF 持久化**，W7D5 加固）+ MySQL 8.4（healthcheck 就绪序：带密码 root ping 防 init 临时 server 误报）→ 应用 `dev,mysql` 双 profile（宿主机或 `--profile fullstack` 容器化）。克隆三步见「快速启动」；部署冒烟证据（克隆体验/查问办/C2 抽查/索引重建）见 `docs/deploy/w7d4-compose-smoke.md`。
+`docker-compose up -d` 拉起 redis-stack（本地镜像禁 pull + **AOF 持久化落在卷上**：W7D5 开 `--appendonly`，W8D4 终验补 `--dir /data` 才真正钉到挂载点，见踩坑 #19）+ MySQL 8.4（healthcheck 就绪序：带密码 root ping 防 init 临时 server 误报）→ 应用 `dev,mysql` 双 profile（宿主机或 `--profile fullstack` 容器化）。克隆三步见「快速启动」；部署冒烟证据（克隆体验/查问办/C2 抽查/索引重建）见 `docs/deploy/w7d4-compose-smoke.md`，终稿文档下的从零复验 + 容器重建持久化复验见 `docs/deploy/w8d4-final-smoke.txt`。
 
 ## 模型切换
 
@@ -438,6 +438,7 @@ W5D0 起聊天与 embedding 分路由（`spring.ai.model.*` 路由键，双 star
 16. **持久化库 init 重跑 × 缺唯一约束 = 种子数据翻倍（W7D5，本周期最重要的坑）**：`order_item` 只有自增主键，无 (order_no, product_id) 唯一键——H2 内存库每次启动都是全新库永远踩不到；MySQL 持久化卷上应用重启两次 init 后种子明细翻倍（16 行），`continue-on-error` 只兜得住有唯一键的表，C3 退款回归「还库存 ×2」就此钓出。幂等/锁/状态机全部无辜（审计 10 条同键 code=0、条件迁移只中一次），是**测试夹具被污染**。修复：双平台 schema 补 `uk_order_item_order_product` + 存量去重 + ALTER——init 幂等从 4/5 表补齐 5/5 表。教训：`CREATE TABLE IF NOT EXISTS` + `continue-on-error` 的「幂等」只覆盖有唯一键的写入；换持久化库必须重审所有 seed 的唯一性。
 17. **redis-stack-server 停机不落 RDB（W7D5）**：deb 版 `redis-stack-server` 不透传 SIGTERM 落盘（redis 日志证实最后一次 BGSAVE 与 stop 间隔 17 分钟且 stop 时无 save），`docker stop/start` 后自上次周期 BGSAVE 起的写入全丢——C5 矩阵 E「恢复后知识事实回归」失败（索引蒸发），幂等标记/会话记忆同窗受损。修复：compose 显式 `--appendonly yes --save 60 1` + 重启写入存活实测；知识索引按设计由应用重启指纹重建兜底（与 W5D5 踩坑 #9 一脉相承，本次补上部署层根治）。
 18. **证据漂移：同名 JTL 被复跑覆盖，文档数字与入仓证据脱钩（W8D4 收口时钓出）**：压测跑批固定写 `s1-cold.jtl` / `s1-hot-shape.jtl`，复跑即原地覆盖，而矩阵文档里的吞吐是**当时那一版 JTL** 现算的——W8 逐条核对时发现 344.8/529.1/3514.9 三个吞吐与入仓 JTL 重算值（523.6/1351.4/3644.3）全部不符，冷组 P50 一格还误填了尾段命中样本的 P95（22ms），且 `report-w7d3-*` 是 gitignore 的本地目录（简历里当作证据路径等于死链）。修复：吞吐口径统一改成「JMeter 报告 `Total.Throughput`=样本数÷首末样本跨度，可用入仓 JTL 一键复现」，硬指标②由 10.2 倍**下调为 7.0 倍**（与同 JVM evict 探针的纯缓存 ≈7 倍互相印证），README/简历/学习指南/矩阵四处同步。教训：**证据要能被第三方从仓内文件复算**，否则数字再漂亮也只是当时的一句陈述；跑批输出应带时间戳或只增不改（`-l run-<date>.jtl`），文档只引用被冻结的那一份。
+19. **AOF 开了但没落在卷上：deb 版 redis-stack-server 的默认 `dir` 不是 `/data`（W8D4 克隆即跑终验钓出）**：W7D5 给 compose 加了 `--appendonly yes --save 60 1`，并且「重启写入存活实测」通过——但那用的是 `docker stop/start`（同一个容器、同一层），而 `dir` 默认值 `/var/lib/redis-stack` 并不在 `redis-data:/data` 这个挂载点上，AOF 全程写进**容器可写层**。终验用独立项目 + 全新卷从零走，收尾把原堆栈 `down` + `up -d`（不带 `-v`，卷保留）后 `DBSIZE=0`、`FT.INFO` 无索引、redis 日志冒出「Creating AOF base file ... on server start」——等于宣告卷是空的。修复一行：`--dir /data`，复验 `CONFIG GET dir=/data`、卷内出现 `appendonlydir/`、再走一次全容器重建标记键存活、MySQL 侧 orders/order_item 行数一行不差。教训：**持久化验证必须区分「容器重启」和「容器重建」两档，并确认落盘路径真的在挂载点上**——`volumes:` 声明了目录不等于进程往里写。同坑族谱：踩坑 #16（H2 内存库永远踩不到持久化库才有的问题）、#17（默认参数下的落盘时机）。
 
 ## 当前进度
 

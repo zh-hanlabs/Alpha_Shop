@@ -14,8 +14,10 @@ services:
       - redis-data:/data
     # W7D5 回归加固（C5 钓出）：此 deb 版 redis-stack-server 不透传 SIGTERM 落 RDB，
     # docker stop 后自上次周期 BGSAVE（默认 300s 规则）起的写入全丢——知识索引/会话记忆/幂等标记
-    # 均受影响。显式 AOF（每写必落）+ 60s RDB 兜底，stop/restart 不再丢窗口内数据
-    command: ["/opt/redis-stack/bin/redis-stack-server", "--bind", "0.0.0.0", "--appendonly", "yes", "--save", "60", "1"]
+    # 均受影响。显式 AOF（每写必落）+ 60s RDB 兜底，stop/restart 不再丢窗口内数据。
+    # W8D4 终验补刀：deb 版默认 `dir` 是 /var/lib/redis-stack 而非挂载点 /data，
+    # AOF 落在容器可写层——stop/start 保得住（同一层），down/重建容器即全丢。显式 --dir /data 把落盘钉在卷上。
+    command: ["/opt/redis-stack/bin/redis-stack-server", "--bind", "0.0.0.0", "--dir", "/data", "--appendonly", "yes", "--save", "60", "1"]
     healthcheck:
       # redis-stack-server 镜像基于 redis:7 + 官方 deb 解包，redis-cli 在
       test: ["CMD-SHELL", "redis-cli ping | grep PONG"]

@@ -216,15 +216,17 @@ ShopAgentGraph
 - **口径陷阱如实声明**：S1 的 getStock 每请求实时查库（缓存只省 detail JSON，12ms 热稳态里有一次 MySQL PK 查询当地板）；CSV 每 JMeter 进程从头读→跨进程重复 userId 命中幂等重放（样本数≠新订单数，按 audit 对账）；usage 桩不回传=N/A+answerChars 代理。
 - **踩坑换来的 runbook**：调限流参数必须 `--scan --pattern '*rlimit*'` 全删存量桶（trySetRate 不覆盖活桶+内部键带 hash-tag）；JMeter 遇已存在 JTL 拒绝启动（静默无 summary）。
 
-### 9.3 两个 W7 钓出的真 bug（混沌回归的价值证明，面试讲故事首选）
+### 9.3 混沌与终验钓出的真 bug（回归价值的最好证明，面试讲故事首选）
 
 1. **order_item 缺唯一约束 × 持久化库 init 重跑**：C3 退款回归「还库存 ×2」。逐层排查（幂等审计 10 条同键 code=0、状态机条件迁移只中一次）→ 根因：`order_item` 只有自增主键，MySQL 持久化卷经历两次 init（宿主应用→容器应用）后种子明细翻倍，`continue-on-error` 只兜得住有唯一键的表——**H2 内存库每次启动都是干净库，这个坑 H2 时代永远踩不到**。修复=双平台 schema 补 `uk_order_item_order_product`+存量去重+ALTER，重启后行数稳定实证 init 幂等补齐 5/5 表，C3 复跑 PASS。教训：幂等/锁/状态机全部无辜，是测试夹具被污染；换持久化库必须重审所有 seed 的唯一性。
-2. **redis-stack-server 停机不落 RDB**：C5 矩阵 E「恢复后知识事实回归」失败——redis 日志实证 deb 版包装不透传 SIGTERM（最后 BGSAVE 与 stop 间隔 17 分钟且 stop 时无 save），docker stop 后自上次周期 BGSAVE 起的写入全丢（知识索引/幂等标记/会话记忆同窗受损）。修复=compose 显式 `--appendonly yes --save 60 1`（写入跨重启存活实测）；知识索引按设计由应用重启指纹重建兜底。
+2. **redis-stack-server 停机不落 RDB**：C5 矩阵 E「恢复后知识事实回归」失败——redis 日志实证 deb 版包装不透传 SIGTERM（最后 BGSAVE 与 stop 间隔 17 分钟且 stop 时无 save），docker stop 后自上次周期 BGSAVE 起的写入全丢（知识索引/幂等标记/会话记忆同窗受损）。修复=compose 显式 `--appendonly yes --save 60 1`；知识索引按设计由应用重启指纹重建兜底。
+3. **AOF 开了却没落在卷上（W8D4 克隆即跑终验钓出）**：第 2 项的修复当时只验到 `docker stop/start` 就收尾，而 deb 版 redis-stack-server 的默认 `dir=/var/lib/redis-stack`，不是挂载点 `/data`——AOF 一直写在容器可写层。终验收尾把原堆栈 `down` + `up -d`（保留卷）后 `DBSIZE=0`、`FT.INFO` 无索引、日志冒出「Creating AOF base file on server start」才暴露。修复一行 `--dir /data`，复验容器全重建后标记键存活。教训（这条最能讲）**持久化验证要分「容器重启」和「容器重建」两档，且要确认落盘路径真在挂载点上——`volumes:` 声明了目录不等于进程往里写**；也说明「已根治」的结论必须绑定它的验证口径，换一档验证就可能翻车。
 
 ### 9.4 部署形态（Docker Compose，ADR D8 的落地）
 
 - `docker-compose up -d`：redis-stack（本地镜像 build 禁 pull，deb 不入仓）+ MySQL 8.4（healthcheck 用**带密码 root ping**——防首次 init 的临时 server 误报健康）→ 应用 `dev,mysql` 双 profile（宿主机跑，压测本就打本地）。
 - **克隆体验验证**：全新命名卷 → 应用启动 init 自动播种（商品库存回种子值）→ 向量索引按指纹幂等重建（40 条/1.8-2.6s）——一条命令后查/问/办全链路中文零乱码可用。
+- **W8D4 从零复验（终稿口径）**：独立 compose 项目 + 全新卷走 8 项判定（就绪序/播种行数/索引首建与重启跳过/查/下单幂等/退款幂等+状态机拒绝/KNN 直验/降级），证据 `docs/deploy/w8d4-final-smoke.txt`；这一趟的真正价值是**把「已根治」的 AOF 又钓回一次**（见 §9.3 第 3 条）。
 - app 容器化=加分项：`--profile fullstack` 才启动（零网络 Dockerfile COPY jar），容器内走服务名（SPRING_DATA_REDIS_HOST 宽松绑定）。
 - 数据库切换的语义红线：只动连接层，幂等键/锁键/缓存键/观测口径零漂移，C1/C2 跨库回归通过才算切换成功。
 
@@ -295,7 +297,7 @@ mock 数据刻意埋的故事线：
 | 为什么限流护盾有价值？真 LLM 不就 ~1s 一轮吗？ | 真 DeepSeek 实测链路开销 <6%（totalMs−llmMs），瓶颈在生成——所以保护的就是这条最贵最脆的生成链路；桩 96.5/s 的吞吐若直打真 API=账号配额秒烧。限流打在真瓶颈之前 |
 | 为什么桩测而不用真 LLM 压？ | 确定性（回归可比）/成本（万级样本零 API 费）/口径隔离（工程链路能力与模型能力解耦）；真 LLM 只小样本验体感与 usage 回传（17/17 真回传顺带收口了 W6 的 N/A 口径） |
 | H2→MySQL 为什么不干脆全切？ | 双 profile：dev 默认 H2 保「clone 即跑」与单测口径零动（140 用例零改），压测/部署才 `dev,mysql`；切换的红线=只动连接层，幂等/锁/缓存键零漂移，C1/C2 跨库回归通过才算数。全切会把开发体验和测试隔离一起牺牲掉 |
-| 混沌回归钓出过真 bug 吗？ | 两个（W7D5）：①C3 还库存 ×2——order_item 缺 (order_no,product_id) 唯一约束，持久化库 init 重跑种子明细翻倍；H2 内存库每次全新启动**永远踩不到**，换 MySQL 才暴露。幂等/锁/状态机全无辜，是夹具被污染——修复在 schema 层补唯一键。②C5 恢复后知识未回归——redis-stack 停机不透传 SIGTERM 落盘，compose 补 AOF。**教训：换持久化基础设施时，所有 seed 写入的唯一性要重审；「continue-on-error 兜底」只兜得住有唯一键的表** |
+| 混沌回归钓出过真 bug 吗？ | 三个。①C3 还库存 ×2——order_item 缺 (order_no,product_id) 唯一约束，持久化库 init 重跑种子明细翻倍；H2 内存库每次全新启动**永远踩不到**，换 MySQL 才暴露。幂等/锁/状态机全无辜，是夹具被污染——修复在 schema 层补唯一键。②C5 恢复后知识未回归——redis-stack 停机不透传 SIGTERM 落盘，compose 补 AOF。③W8D4 克隆即跑终验——②的 AOF 其实没生效：deb 版默认 `dir=/var/lib/redis-stack` 不在 `redis-data:/data` 挂载点上，写在容器可写层，`stop/start` 保得住、`down/up` 全丢，补 `--dir /data` 才是真落卷。**教训两条：换持久化基础设施时所有 seed 写入的唯一性要重审（continue-on-error 只兜得住有唯一键的表）；「已根治」的结论必须绑定它的验证口径，容器重启≠容器重建** |
 | compose 编排为什么 app 不进容器？ | 压测本就打本地 app，编排范围收窄到依赖中间件=一键拉起+healthcheck 就绪序；app 容器化做成了加分项（--profile fullstack，零网络 Dockerfile COPY jar），默认体验不变 |
 
 ### 三层追问自测存档（W8D2，对照主计划 §0 映射表五行）
@@ -342,7 +344,7 @@ mock 数据刻意埋的故事线：
 | 档 | 局限（一句话） | 缓解 / 演进路径 | 主动讲时机 | 原文 |
 |---|---|---|---|---|
 | 已根治 | InMemory 记忆有并发竞态（W3D4 实测 10 路 4 错配） | W6 换 `RedisChatMemoryRepository` 根治；当时的实测同时证明「LLM 层的混乱被工具层闸序完全兜住」 | 讲幂等或讲记忆演进时，一条素材两用 | README「交易安全设计」局限 2 |
-| 已根治 | redis-stack 停机不落 RDB，最后一次周期 BGSAVE 之后的写入全丢 | W7D5 compose 显式 `--appendonly yes --save 60 1`，跨重启写入存活实测 | 被问「Redis 挂了数据怎么办」；也可作「混沌回归钓出真 bug」的故事（§9.3） | README「压测与部署」+ §9.3 |
+| 已根治 | redis-stack 停机不落 RDB，最后一次周期 BGSAVE 之后的写入全丢 | 两步才真根治：W7D5 compose 显式 `--appendonly yes --save 60 1`，W8D4 终验发现 deb 版默认 `dir=/var/lib/redis-stack` 不在挂载点、AOF 其实写在容器可写层，补 `--dir /data` 后容器**重建**（非仅重启）复验标记键存活 | 被问「Redis 挂了数据怎么办」；更好是用它讲**「已根治」要绑定验证口径**——stop/start 过了不等于 down/up 过（§9.3 第 3 条） | README「压测与部署」+ 踩坑 #19 + §9.3 |
 | 已根治 | `order_item` 缺唯一约束，持久化库重复 init 后种子明细翻倍 | 双平台 schema 补 `(order_no,product_id)` uk + 存量去重，init 幂等补齐 5/5 表 | 被问「测试/压测给你带来过什么实际价值」——首选 | README「压测与部署」局限 + §9.3 |
 | 已收口 | token usage 桩环境拿不到，早期只能报字符数代理 | W7D3 真 DeepSeek 复测 usage 真回传 17/17；桩仍为 `null`=N/A 并用 `usageHits` 标覆盖率 | **报任何 token 数字之前**：先说覆盖率再说数值 | README「稳定性设计」局限 5 |
 | 有取舍 | 指令摘要只是客户端幂等令牌的近似（同会话隔天一字不差重说仍被拦，窗口=TTL 24h） | 用指令摘要换前端零改动；生产解=客户端 requestId 令牌 | 讲幂等键设计时主动带出「这里我用近似换了一个工程便利性」 | README「交易安全设计」局限 1 |
@@ -387,6 +389,7 @@ mock 数据刻意埋的故事线：
 - [ ] H2→MySQL 双 profile 的语义红线是什么？为什么不全切？
 - [ ] C3「还库存 ×2」的根因链路能完整讲出来吗？为什么 H2 时代踩不到？
 - [ ] redis 停机不落盘是怎么定位的（日志证据）？部署层怎么根治？
+- [ ] 「已根治」为什么必须绑定验证口径？容器 stop/start 过了、down/up 却丢数据是踩在哪一层（dir 与挂载点）？（W8D4）
 - [ ] 闸序为什么写在工具层，而不是 controller 或 service？（W8D2）
 - [ ] 只用数据库唯一索引 + 乐观锁为什么不够？三层防线各拦什么？（W8D2）
 - [ ] RAG「10/10」的三条件是什么？为什么题目清单里必须有一道无关题？（W8D2）
@@ -404,4 +407,4 @@ mock 数据刻意埋的故事线：
 - `docs/resume/shopagent-bullets.md` — **对外交付物（管「写什么」）**：项目段落 + 5 条 bullet + 数字出处表 18 行（含口径一句话）+ 终审清单；与本文分工=本文管「怎么讲」，两份不重复维护（W8 清单 §2.2）
 - `docs/chaos/` — C1-C7 混沌测试脚本与证据 | `docs/cache/` 缓存证据 | `docs/rag/` RAG 冒烟证据（`rag-cases.json` 10 题清单） | `docs/resilience/` W6 稳定性证据（含双实例演证） | `docs/jmeter/` W7 压测脚本与双源证据（w7d2 基线 + w7d3 矩阵） | `docs/deploy/` W7 部署冒烟与 W1 真 Key 复跑
 - 各周任务清单：`shopagent-w1w2-mvp-tasks.md` → `shopagent-w8-tasks.md`（逐日决策与验收记录）
-- **本文自身**：§1 电梯演讲与数字弹药｜§3-§5 五层架构与九工具｜§6 闸序与幂等四态｜§7 稳定性与分级降级矩阵｜§8 RAG 与两级缓存｜§9 压测口径与两个真 bug｜§11 主题问答 28 条（五组）+ **三层追问自测存档 15 问答（5 条 bullet × 三层，W8D2）**｜§12 **已知局限三段式应答表 20 行**（覆盖 README 四章全部条目 + W7 两个已根治项）｜§13 自测清单 27 项
+- **本文自身**：§1 电梯演讲与数字弹药｜§3-§5 五层架构与九工具｜§6 闸序与幂等四态｜§7 稳定性与分级降级矩阵｜§8 RAG 与两级缓存｜§9 压测口径与三个真 bug｜§11 主题问答 28 条（五组）+ **三层追问自测存档 15 问答（5 条 bullet × 三层，W8D2）**｜§12 **已知局限三段式应答表 20 行**（覆盖 README 四章全部条目 + W7 两个已根治项）｜§13 自测清单 28 项
