@@ -1,0 +1,6 @@
+timeStamp,elapsed,label,responseCode,responseMessage,threadName,dataType,success,failureMessage,bytes,sentBytes,grpThreads,allThreads,URL,Latency,IdleTime,Connect
+1791182639859,28,GET product-detail,200,,cache-detail-threads 1-1,text,true,,355,157,1,1,http://127.0.0.1:8080/api/dev/cache/product-detail?productId=2,25,0,12
+1791182639890,4,GET product-detail,200,,cache-detail-threads 1-1,text,true,,355,157,1,1,http://127.0.0.1:8080/api/dev/cache/product-detail?productId=2,4,0,0
+1791182639894,4,GET product-detail,200,,cache-detail-threads 1-1,text,true,,355,157,1,1,http://127.0.0.1:8080/api/dev/cache/product-detail?productId=2,4,0,0
+1791182639899,4,GET product-detail,200,,cache-detail-threads 1-1,text,true,,355,157,1,1,http://127.0.0.1:8080/api/dev/cache/product-detail?productId=2,4,0,0
+1791182639904,3,GET product-detail,200,,cache-detail-threads 1-1,text,true,,355,157,1,1,http://127.0.0.1:8080/api/dev/cache/product-detail?productId=2,3,0,0

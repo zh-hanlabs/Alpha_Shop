@@ -22,8 +22,8 @@
 - [ ] MySQL 双 profile：`dev,mysql` 激活下九工具 + 下单/退款全闸序 + 知识检索 + 两级缓存全链路跑通，utf8mb4 中文零乱码；dev 默认 H2 clone 即跑与单测口径（133 绿+7 跳）零动
 - [ ] 混沌 C1/C2 在 MySQL 上回归 PASS（幂等/锁/零超卖跨库不变）
 - [ ] JMeter 四组脚本：S1 缓存详情链路 / S2 交易下单并发 / S3a 聊天阻塞端点（桩 LLM）/ S3b SSE 流式（插件）——JTL + HTML 报告证据存档 `docs/jmeter/`
-- [ ] 限流前后对比数字落袋：关/开两组吞吐、429 比例、P95，全局桶 10/s 精确放行核验（主计划 §11 DoD 硬指标①）
-- [ ] 缓存命中提升数字落袋：冷（回源 DB）vs 热（L1/L2 命中）QPS/P95 对比（主计划 §11 DoD 硬指标②）
+- [x] 限流前后对比数字落袋（D3）：关/开同形突发 300 请求=300 全过 vs **10 放行/96.67% 429**；放行 P50 36→65ms、持续组 P95 24→48ms；**全局桶 10/s 精确放行核验=突发恰放 10 + 持续满秒 admit=10**；双源对账 限流开 31 OK+470 RL / 限流关 501 轮全 OK（主计划 §11 DoD 硬指标①，证据 docs/jmeter/w7d3/）
+- [x] 缓存命中提升数字落袋（D3）：冷（重启+DEL L2）344.8/s / 热稳态 **3514.9/s ≈ 10.2 倍**，P95 162ms→23ms ≈ 7 倍；隔离口径=同 JVM evict 后回源 28ms vs L1 命中 3-4ms（纯缓存贡献 ≈7 倍，冷窗余量为 JIT/池预热，S1 的 getStock 每请求实时查库口径已声明）（主计划 §11 DoD 硬指标②，证据 docs/jmeter/w7d3/）
 - [ ] 交易并发压测：ramp-up 异键并发零超卖、库存精确扣减；同键 ×N 并发全返首次
 - [ ] 真 LLM 小样本延迟参照（真 DeepSeek 10-20 请求，首 token/整轮 P50/P95）+「链路吞吐 ≠ LLM 能力」口径声明进 README
 - [ ] 取数双源：JMeter JTL/HTML（客户端）+ TurnMetrics 单行 JSON 日志解析脚本（服务端 outcome/llmMs/工具分布），双源口径对齐写清
@@ -101,10 +101,10 @@
 
 ### D3：压测矩阵 + 数字落袋
 
-- [ ] T3.1 缓存冷/热两组（硬指标②）：冷=重启应用清 L1 + 仅 DEL 目标 L2 键首轮回源；热=预热全命中——QPS/P95 提升数字
-- [ ] T3.2 限流关/开两组（硬指标①）：聊天链路（桩 LLM）吞吐 / 429 比例 / P95 对比 + 全局桶 10/s 精确放行核验【D2 runbook：切组前必须 `--scan --pattern '*rlimit*'` 全删存量桶（含 {..}:permits/:value 内部键），trySetRate 不覆盖活桶——D2 踩坑①】
-- [ ] T3.3 交易 ramp-up 并发：异键零超卖库存精确扣减 + 同键 ×N 并发全返首次（幂等 under load）【D2 runbook：CSV 每 JMeter 进程从头读，跨进程重复 userId 会命中幂等重放（行为正确但样本数≠新订单数），足量新单需分段用 CSV 或换文件，按 audit/stats 对账】
-- [ ] T3.4 真 LLM 小样本：真 DeepSeek 10-20 请求首 token/整轮 P50/P95 + 数字回填本清单 §一 + JTL/HTML/日志解析三件证据存档
+- [x] T3.1 缓存冷/热两组（硬指标②）：冷=重启清 L1 + 仅 DEL 目标 L2 键（`cache:product:detail:2`）首轮回源计冷；热=预热全命中——**344.8/s vs 3514.9/s ≈10.2 倍、P95 162→23ms**；冷窗穿透 cohort（54 样本）P50=160ms（无 singleflight 真 dogpile）+ 同 JVM evict 探针 28ms vs L1 3-4ms 隔离口径 + getStock 实时查库声明（w7d3-stress-matrix.md）
+- [x] T3.2 限流关/开两组（硬指标①）：聊天链路（桩 LLM）同形突发+持续两组吞吐 / 429 比例 / P95 对比 + 全局桶 10/s 精确放行核验（突发恰 10、满秒 admit=10）【runbook 已执行：切组前 `--scan --pattern '*rlimit*'` 全删（清 903 遗留键）——D2 踩坑①】；S3a body D3 起改全请求唯一 user（全局桶单独受控）
+- [x] T3.3 交易 ramp-up 并发：异键 100 线程/ramp10s/200 单 CSV-b 专用段**零超卖库存 500→300 精确对账** + 同键 100 并发全返首次**仅 1 单 300→299**（Avg=849ms=锁排队代价随并发线性，D2 t50=495ms→D3 t100=849ms）；product 2 stock 重置 500 为 fixture（已记录数据漂移）
+- [ ] T3.4 真 LLM 小样本：真 DeepSeek 10-20 请求首 token/整轮 P50/P95 + 数字回填本清单 §一 + JTL/HTML/日志解析三件证据存档【⏸ 阻塞：DEEPSEEK_API_KEY 会话/Windows User/Machine 级均未设置；runbook 已备于 w7d3-stress-matrix.md，密钥到位后 ~10 分钟出数】
 
 ### D4：Docker Compose
 

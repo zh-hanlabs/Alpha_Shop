@@ -2,7 +2,7 @@
 <jmeterTestPlan version="1.2" properties="5.0" jmeter="5.6.3">
   <hashTree>
     <TestPlan guiclass="TestPlanGui" testclass="TestPlan" testname="S3a chat blocking stub-LLM" enabled="true">
-      <stringProp name="TestPlan.comments">S3a 聊天阻塞端点（W7D2 T2.1，签名现场核对=ChatController.chat，body={conversationId,message,userId}）：POST /api/chat 打本地桩 LLM（DEEPSEEK_BASE_URL=http://127.0.0.1:18081）。每请求唯一 conversationId+固定 threadNum 用户（真实用户群像）；限流开=全局桶 10/s 精确放行、超量 429（429 被 status-200 断言判为 error，error%=拒绝率=硬指标①）；限流关=启动参数覆盖 resilience.rate-limit.* 为极大值。口径：数字=Agent 工程链路吞吐，非 LLM 生成能力（w7-tasks §2.2）。</stringProp>
+      <stringProp name="TestPlan.comments">S3a 聊天阻塞端点（W7D2 T2.1 建档；W7D3 T3.2 起 body 改为全请求唯一 userId/conversationId——用户桶不绑定，全局桶 10/s 单独受控做「精确放行」核验；W6 用户桶 2/s 行为由 W6D1 burst 脚本与 D2 sanity 覆盖）：POST /api/chat 打本地桩 LLM（DEEPSEEK_BASE_URL=http://127.0.0.1:18081）。限流开=默认参数（跑前须清存量桶 *rlimit*，D2 踩坑①）；限流关=启动参数覆盖 resilience.rate-limit.* 为极大值。口径：数字=Agent 工程链路吞吐，非 LLM 生成能力（w7-tasks §2.2）。</stringProp>
       <boolProp name="TestPlan.functional_mode">false</boolProp>
       <boolProp name="TestPlan.tearDown_on_shutdown">true</boolProp>
       <boolProp name="TestPlan.serialize_threadgroups">false</boolProp>
@@ -31,7 +31,7 @@
             <collectionProp name="Arguments.arguments">
               <elementProp name="" elementType="HTTPArgument">
                 <boolProp name="HTTPArgument.always_encode">false</boolProp>
-                <stringProp name="Argument.value">{&quot;conversationId&quot;:&quot;lc-${__threadNum()}-${__counter(FALSE,C)}&quot;,&quot;message&quot;:&quot;hello-stub&quot;,&quot;userId&quot;:&quot;ul-${__threadNum()}&quot;}</stringProp>
+                <stringProp name="Argument.value">{&quot;conversationId&quot;:&quot;lc-${__counter(FALSE,C)}&quot;,&quot;message&quot;:&quot;hello-stub&quot;,&quot;userId&quot;:&quot;ul-${__counter(FALSE,CU)}&quot;}</stringProp>
                 <stringProp name="Argument.metadata">=</stringProp>
               </elementProp>
             </collectionProp>
