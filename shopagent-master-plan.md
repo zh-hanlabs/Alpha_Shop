@@ -255,8 +255,8 @@ Agent 调交易工具的三个风险：
 8 周结束时：
 - [x] 演示链路全通：查 → 问 → 办（含退款），带幂等与锁的可视化日志 —— **W8D5 真 DeepSeek 终验**（13 轮，`docs/deploy/w8d5-demo-evidence.txt`）：查（u1001 的 10001 明细+物流，模型自主并行两工具，答案与库内真值 148.90/129.00/19.90/SHIPPED 逐项一致）→ 问（RAG 露营灯防水，四个事实点全来自语料）→ 办（下单先查再请确认、确认后一次落单，库存 43→42 只扣 1 次）→ 办（退款 10002→REFUNDED、两商品各还库存 +1、审计 id=139）；幂等=**跨层重放**（真 LLM 写的 `5eb9d614…` 键，工具层 `/api/dev/chaos/refund` 重放命中同一把锁与同一份缓存：`code=0` 返首次结果、库存零变化、审计 2 条同键）；锁=**命令级证据**：`redis-cli MONITOR` 30 条 EVALSHA = tryLock 22 + unlock 8、8 对 `hincrby ±1`、1 SET mark + 1 PSETEX result；单测口径零动（140 中 133 绿 + 7 跳）。**本轮另钓出第四个真问题**：模型「口头退款」（空转，三源证明零执行），已入 README 局限 8 / 踩坑 #20 / 学习指南 §9.3 第 4 条
 - [x] JMeter 报告：含限流前后对比、缓存命中提升的 QPS 数字（简历用） —— `docs/jmeter/w7d3/w7d3-stress-matrix.md`（T3.1 更正说明 + 入仓 JTL 可复算）：限流关/开同形突发 300=全过 vs 10 放行（96.67% 429）；冷 523.6/s→热稳态 3644.3/s **≈7.0 倍**（P95 162ms→23ms 同 ≈7.0 倍；同形状冷热 2.6 倍作保守档一并报），双源对账（TurnMetrics ↔ JTL）；真 LLM 延迟参照 `docs/jmeter/w7d3/parse-real.txt`（usage 17/17）
-- [x] README：架构图 + 交易安全设计章节 + 混沌测试截图 + 一键启动 —— 三图入仓 `docs/screenshots/w8d4-{chat-flow,chaos-c1,jmeter-cold,jmeter-hot}.png`；引用路径存在性全查零 MISSING；踩坑实录 20 条
-- [x] commit 历史清晰可读（按周成段） —— 全量校对 70/70 合规零违规（正则 `^W\d+D\d+: `），每段首末抽样 14 条 `git show --stat` 标题相符；按周分段档案见 `docs/resume/shopagent-bullets.md` 附二
+- [x] README：架构图 + 交易安全设计章节 + 混沌测试截图 + 一键启动 —— 三张截图入仓（四张 PNG，JMeter 为冷/热双联）`docs/screenshots/w8d4-{chat-flow,chaos-c1,jmeter-cold,jmeter-hot}.png`，README 三处嵌入；`docs/**` 引用路径存在性全查零 MISSING；踩坑实录 20 条
+- [x] commit 历史清晰可读（按周成段） —— 全量校对零违规（D3 复核 70/70 + W8D5 收官重扫 **74/74**，分布 W1×30 / W3×6 / W4×5 / W5×9 / W6×6 / W7×10 / W8×8；复算命令 `git log --format='%s' | grep -vcE '^W[0-9]+D[0-9]+: '` = 0），每段首末抽样 14 条 `git show --stat` 标题相符；按周分段档案见 `docs/resume/shopagent-bullets.md` 附二
 - [ ] 每条简历 bullet 能扛住三层追问（对照 §0 映射表自测） —— **文档层已就位**：5 条 bullet × 三层 = 15 问答存档（学习指南 §11 末）+ §13 自测清单 29 项；**这一格的判定权在本人脱稿复述**（`docs/resume/shopagent-bullets.md` §7 七项，W8 清单 T1.3 同一道闸），复述通过的行由本人勾选，讲不出的回补学习指南——Agent 不代勾、不冒充完成
 - [x] Docker Compose 一条命令拉起全部依赖 —— `compose.yml`（redis-stack + mysql 8.4，健康门 + AOF `--dir /data`）；克隆即跑终验 `docs/deploy/w8d4-final-smoke.txt`（独立项目 + 全新卷从零走通 8 项判定，含容器全重建后幂等标记存活复验）
 
