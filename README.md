@@ -88,6 +88,40 @@
 
 ## 🏗️ 架构
 
+**总览：五层主链 + 横切层**——每层只回答一个问题，先建全貌再下钻（组件级明细见下方折叠的对照字典）：
+
+```mermaid
+flowchart TB
+    A["① 前端 index.html<br/>SSE 五类事件消费 · 打字机 · 🔍 工具可视化"]
+    B["② 接入层 controller<br/>限流门卫 · SSE 组装 · userId 注入 ToolContext"]
+    C["③ Agent 编排层 ShopAgentGraph<br/>loadMemory → chat（ReAct 选九工具之一）→ persistMemory"]
+    D["④ 工具层 tools/<br/>6 查询 + 3 交易 · 参数白名单校验 · 统一 ToolResult"]
+    E["⑤ 业务层 service/<br/>状态机流转 · 条件更新 = 数据库层最后兜底"]
+    F[("MySQL 8.4<br/>dev 双 profile：H2 克隆即跑 / dev,mysql")]
+    G[("Redis + Redis Stack<br/>锁 / 幂等 / 限流 / 记忆 / L2 缓存 / 向量索引")]
+    H["横切层 infra/（②③④ 按需取用，不在主链上）<br/>幂等 · 锁 · 审计 · 缓存 · 限流 · 熔断 · 降级 · 记忆 · 观测"]
+
+    A -->|"fetch SSE"| B --> C --> D --> E --> F
+    B -.-> H
+    C -.-> H
+    D -.->|"交易工具必经闸序"| H
+    H -.->|"幂等/锁/限流/记忆/缓存键"| G
+```
+
+| 层 | 包 | 回答的问题 | 铁律 |
+|---|---|---|---|
+| ① 前端 | `static/index.html` | 显示什么 | 零 Node 构建，一个文件 |
+| ② 接入层 | `controller/` | 放不放行 | 不含业务逻辑 |
+| ③ Agent 层 | `agent/ShopAgentGraph` | 这轮调哪个工具 | token 流走 Sinks 旁路，不穿图 state |
+| ④ 工具层 | `tools/`（6 查询 + 3 交易） | 怎么安全地做 | 统一 `ToolResult{code,msg,data}`，异常绝不抛给模型 |
+| ⑤ 业务层 | `service/` | 数据怎么变 | 返回 null 表示查无 |
+| — 横切层 | `infra/` | 公共能力怎么复用 | 独立可测，业务零感知 |
+
+> 读图约定：实线 = 请求主链（单向自上而下），虚线 = 横切能力取用。第一次读只需记住主链 ①→⑤。
+
+<details>
+<summary><strong>组件级对照字典（读代码 / 备面试时查——全组件与防线参数全家桶，点开展开）</strong></summary>
+
 ```mermaid
 flowchart LR
     subgraph FE["前端"]
@@ -136,6 +170,8 @@ flowchart LR
     CP["docker-compose（W7D4）<br/>redis-stack 本地镜像 + mysql:8.4<br/>healthcheck 就绪序 · app 宿主机或容器化"] -.->|"编排中间件"| RED
     CP -.-> H2
 ```
+
+</details>
 
 **分层铁律**：`tools/` 只做参数校验和编排，业务逻辑进 `service/`，横切能力（幂等/锁/审计/缓存/RAG）在 `infra/`。工具统一返回 `ToolResult{code, msg, data}`，异常在工具内消化不抛给模型；交易工具经 `TradeGuard` 统一闸序（锁外快查→抢锁→幂等→审计→解锁）后才进业务层——正确性不依赖模型的自觉，闸序写在代码里。
 
